@@ -179,28 +179,28 @@ for whl in wheel_files:
         c = self._config
         if c.enable_batching:
             return f"""
-@modal.batched(max_batch_size={c.max_batch_size}, wait_ms={c.batch_wait_ms})
-def predict_batch(self, inputs: list[dict]) -> list[dict]:
-    import pandas as pd
-    results = []
-    for input_data in inputs:
-        df = pd.DataFrame(input_data)
-        prediction = self.model.predict(df)
-        results.append({{"predictions": prediction.tolist()}})
-    return results
+    @modal.batched(max_batch_size={c.max_batch_size}, wait_ms={c.batch_wait_ms})
+    def predict_batch(self, inputs: list[dict]) -> list[dict]:
+        import pandas as pd
+        results = []
+        for input_data in inputs:
+            df = pd.DataFrame(input_data)
+            prediction = self.model.predict(df)
+            results.append({{"predictions": prediction.tolist()}})
+        return results
 
-{self._render_fastapi_endpoint_decorator()}
-def predict(self, input_data: dict) -> dict:
-    return self.predict_batch.local([input_data])[0]
+    {self._render_fastapi_endpoint_decorator()}
+    def predict(self, input_data: dict) -> dict:
+        return self.predict_batch.local([input_data])[0]
 """
 
         return f"""
-{self._render_fastapi_endpoint_decorator()}
-def predict(self, input_data: dict) -> dict:
-    import pandas as pd
-    df = pd.DataFrame(input_data)
-    prediction = self.model.predict(df)
-    return {{"predictions": prediction.tolist()}}
+    {self._render_fastapi_endpoint_decorator()}
+    def predict(self, input_data: dict) -> dict:
+        import pandas as pd
+        df = pd.DataFrame(input_data)
+        prediction = self.model.predict(df)
+        return {{"predictions": prediction.tolist()}}
 """
 
     def _render_fastapi_endpoint_decorator(self) -> str:
