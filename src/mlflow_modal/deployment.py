@@ -603,6 +603,8 @@ class ModalDeploymentClient(BaseDeploymentClient):
             # Fall back to streaming URL if no regular predict URL found
             if endpoint_url is None:
                 endpoint_url = streaming_url
+            if endpoint_url is None:
+                endpoint_url = self._construct_endpoint_url(name, "predict")
 
             return {
                 "name": name,
