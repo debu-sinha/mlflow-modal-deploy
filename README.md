@@ -120,6 +120,7 @@ mlflow deployments delete -t modal --name my-model
 | `pip_index_url` | str | None | Custom PyPI index URL for private packages |
 | `pip_extra_index_url` | str | None | Additional PyPI index URL (fallback) |
 | `modal_secret` | str | None | Modal secret name containing pip credentials |
+| `proxy_auth` | bool | False | Enable proxy auth protection for modal endpoint |
 
 ## Authentication
 
@@ -286,6 +287,47 @@ model/
 ├── code/
 │   └── my_private_package-1.0.0-py3-none-any.whl  # Auto-detected
 └── ...
+```
+
+### Deploying with Proxy Authentication Enableed
+Enables [proxy authentication](https://modal.com/docs/guide/webhook-proxy-auth#proxy-auth-tokens) in modal's ENDPOINT URL.
+
+Apps deployed without proxy authentication enabled are public to anyone with knowledge of the endpoint to make api requests, it can be hit by any client over the Internet. With proxy authentication enabled, Modal`s authentication feature only allow users with access to make requests.
+
+```python
+# Deploy model
+client.create_deployment(
+    name="my-classifier",
+    model_uri="runs:/abc123/model",
+    config={
+        "proxy_auth": True,
+    }
+)
+```
+
+```python
+import os
+
+# Set an environment variable (if are not set)
+os.environ['PROXY_TOKEN_ID'] = 'your_api_key_here'
+os.environ['PROXY_TOKEN_SECRET'] = 'your_secret_here'
+
+# Make predictions
+predictions = client.predict(
+    deployment_name="my-classifier",
+    inputs={"feature1": [1, 2, 3], "feature2": [4, 5, 6]},
+    proxy_auth_enabled=True
+)
+```
+
+or
+
+```sh
+export PROXY_TOKEN_ID=your_api_key_here
+export PROXY_TOKEN_SECRET=your_secret_here
+curl -H "Modal-Key: $PROXY_TOKEN_ID" \
+     -H "Modal-Secret: $PROXY_TOKEN_SECRET" \
+     https://private-url--goes-here.modal.run
 ```
 
 ## Troubleshooting
