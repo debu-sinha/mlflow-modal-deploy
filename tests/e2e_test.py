@@ -20,15 +20,19 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import time
 
 import mlflow
+from dotenv import load_dotenv
 from mlflow.deployments import get_deploy_client
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+
+load_dotenv()
 
 
 def train_and_log_model():
@@ -45,7 +49,7 @@ def train_and_log_model():
         return run.info.run_id
 
 
-def make_prediction(endpoint_url: str, max_attempts: int = 3) -> dict | None:
+def make_prediction(endpoint_url: str, max_attempts: int = 3, headers: dict | None = None) -> dict | None:
     """Make a prediction request to the deployed model."""
     import requests
 
@@ -58,7 +62,7 @@ def make_prediction(endpoint_url: str, max_attempts: int = 3) -> dict | None:
 
     for attempt in range(max_attempts):
         try:
-            response = requests.post(endpoint_url, json=sample_data, timeout=180)
+            response = requests.post(endpoint_url, json=sample_data, timeout=180, headers=headers)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -104,6 +108,90 @@ def test_basic_deployment(run_id: str) -> bool:
         if endpoint_url:
             print("  Testing prediction...")
             result = make_prediction(endpoint_url)
+
+            if result:
+                print(f"  Prediction successful: {result}")
+            else:
+                print("  Prediction timed out, but deployment was created")
+
+        return True
+
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+    finally:
+        try:
+            client.delete_deployment(deployment_name)
+            print(f"  Cleaned up: {deployment_name}")
+        except Exception:
+            pass
+
+
+def test_proxy_auth(run_id: str) -> bool:
+    """Test basic deployment with proxy authentication."""
+    print("\n" + "=" * 60)
+    print("TEST: Basic deployment with proxy authentication")
+    print("=" * 60)
+
+    headers = {
+        "Modal-Key": os.environ.get("PROXY_AUTH_TOKEN_ID"),
+        "Modal-Secret": os.environ.get("PROXY_AUTH_TOKEN_SECRET"),
+    }
+    if not headers["Modal-Key"] or not headers["Modal-Secret"]:
+        print(
+            "PROXY_AUTH_TOKEN_ID is not set. Run 'modal token new' to create a new token and add environment variables to your shell. See .env.example for an example."
+        )
+        print(
+            "PROXY_AUTH_TOKEN_SECRET is not set. Run 'modal token new' to create a new token and add environment variables to your shell. See .env.example for an example."
+        )
+        return False
+    client = get_deploy_client("modal")
+    deployment_name = "e2e-test-proxy-auth"
+
+    try:
+        deployment = client.create_deployment(
+            name=deployment_name,
+            model_uri=f"runs:/{run_id}/model",
+            config={
+                "memory": 1024,
+                "timeout": 120,
+                "scaledown_window": 60,
+                "extra_pip_packages": ["structlog>=24.0"],
+                "proxy_auth": True,
+            },
+        )
+
+        print("  Deployment successful!")
+        print(f"  Endpoint URL: {deployment.get('endpoint_url')}")
+
+        # Verify config
+        config = deployment.get("config", {})
+        if not config.get("proxy_auth"):
+            print("  proxy_auth not set")
+            return False
+        else:
+            print("  proxy_auth correctly set")
+
+        # Make prediction
+        endpoint_url = deployment.get("endpoint_url")
+        if endpoint_url:
+            print("  Testing prediction...")
+            import pytest
+            import requests
+
+            with pytest.raises(requests.HTTPError):
+                result = make_prediction(endpoint_url)  # expected to raise 401
+                if result.status_code == 200:
+                    return False
+
+            result = make_prediction(endpoint_url, headers=headers)
+            if result.status_code != 200:
+                return False
+
             if result:
                 print(f"  Prediction successful: {result}")
             else:
@@ -427,6 +515,7 @@ def main():
     parser = argparse.ArgumentParser(description="E2E tests for mlflow-modal-deploy")
     parser.add_argument("--quick", action="store_true", help="Run quick test only")
     parser.add_argument("--stream", action="store_true", help="Run streaming test only")
+    parser.add_argument("--proxy-auth", action="store_true", help="Run proxy authentication test only")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -441,6 +530,8 @@ def main():
         results["basic_deployment"] = test_basic_deployment(run_id)
     elif args.stream:
         results["streaming"] = test_streaming(run_id)
+    elif args.proxy_auth:
+        results["proxy-auth"] = test_proxy_auth(run_id)
     else:
         results["basic_deployment"] = test_basic_deployment(run_id)
         results["streaming"] = test_streaming(run_id)

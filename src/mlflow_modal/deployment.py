@@ -24,6 +24,8 @@ from mlflow.pyfunc import FLAVOR_NAME as PYFUNC_FLAVOR_NAME
 from mlflow.tracking.artifact_utils import _download_artifact_from_uri
 from mlflow.utils.file_utils import TempDir
 
+from .codegen import ModalAppCodeConfig, generate_modal_app_code
+
 _logger = logging.getLogger(__name__)
 
 # Default configuration values
@@ -209,21 +211,14 @@ def _escape_string_for_codegen(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-def _generate_modal_app_code(
+def _build_modal_app_codegen_config(
     app_name: str,
     config: dict[str, Any],
-    model_requirements: list[str] | None = None,
-    wheel_filenames: list[str] | None = None,
-) -> str:
-    """
-    Generate Modal app Python code for serving an MLflow model.
+    model_requirements: list[str] | None,
+    wheel_filenames: list[str] | None,
+) -> ModalAppCodeConfig:
+    """Build a ModalAppCodeConfig from the raw deployment config."""
 
-    Args:
-        app_name: Name of the Modal app
-        config: Deployment configuration
-        model_requirements: List of pip requirements
-        wheel_filenames: List of wheel filenames (just names, not paths) to install from volume
-    """
     gpu_config = config.get("gpu")
     memory = config.get("memory", _DEFAULT_MEMORY)
     cpu = config.get("cpu", _DEFAULT_CPU)
@@ -241,177 +236,66 @@ def _generate_modal_app_code(
     pip_index_url = config.get("pip_index_url")
     pip_extra_index_url = config.get("pip_extra_index_url")
     modal_secret = config.get("modal_secret")
-
-    # Handle GPU config: string, multi-GPU string ("H100:8"), or fallback list
-    if not gpu_config:
-        gpu_str = "None"
-    elif isinstance(gpu_config, list):
-        gpu_str = "[" + ", ".join(f'"{g}"' for g in gpu_config) + "]"
-    else:
-        gpu_str = f'"{gpu_config}"'
-
-    pip_packages = ["mlflow"]
-    if model_requirements:
-        pip_packages.extend(model_requirements)
-    if extra_pip_packages:
-        pip_packages.extend(extra_pip_packages)
-    uv_pip_install_args = [f'"{pkg}"' for pkg in pip_packages]
-    # Use multi-line formatting when there are many packages to avoid
-    # generating a single line too long for Python to parse
-    if len(uv_pip_install_args) > 10:
-        uv_pip_install_str = "\n        " + ",\n        ".join(uv_pip_install_args) + ",\n    "
-    else:
-        uv_pip_install_str = ", ".join(uv_pip_install_args)
-
-    # Build pip install arguments for private repos (escape URLs for safe code generation)
-    pip_install_kwargs = []
-    if pip_index_url:
-        pip_install_kwargs.append(f'index_url="{_escape_string_for_codegen(pip_index_url)}"')
-    if pip_extra_index_url:
-        pip_install_kwargs.append(f'extra_index_url="{_escape_string_for_codegen(pip_extra_index_url)}"')
-    pip_install_kwargs_str = ", ".join(pip_install_kwargs)
-    if pip_install_kwargs_str:
-        pip_install_kwargs_str = ", " + pip_install_kwargs_str
-
-    scaling_parts = []
     min_containers = config.get("min_containers", _DEFAULT_MIN_CONTAINERS)
     max_containers = config.get("max_containers")
+    proxy_auth = config.get("proxy_auth", False)
 
-    if min_containers is not None and min_containers > 0:
-        scaling_parts.append(f"min_containers={min_containers}")
-    if max_containers is not None:
-        scaling_parts.append(f"max_containers={max_containers}")
-    if buffer_containers is not None:
-        scaling_parts.append(f"buffer_containers={buffer_containers}")
-    if scaledown_window is not None:
-        scaling_parts.append(f"scaledown_window={scaledown_window}")
-    if startup_timeout is not None:
-        scaling_parts.append(f"startup_timeout={startup_timeout}")
+    # Escape URLs for safe code generation
+    pip_index_url = _escape_string_for_codegen(pip_index_url) if pip_index_url else None
+    pip_extra_index_url = _escape_string_for_codegen(pip_extra_index_url) if pip_extra_index_url else None
 
-    scaling_str = "\n    ".join(f"{part}," for part in scaling_parts)
+    # Parse secret name for safe code generation
+    modal_secret = _escape_string_for_codegen(modal_secret) if modal_secret else None
 
-    # Generate wheel installation code if wheels are present
-    wheel_install_code = ""
-    if wheel_filenames:
-        wheel_paths = [f"/model/wheels/{whl}" for whl in wheel_filenames]
-        wheel_install_code = f"""
-        # Install wheel dependencies from volume
-        import subprocess
-        import sys
-        wheel_files = {wheel_paths}
-        for whl in wheel_files:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", whl, "--quiet"])
-"""
+    return ModalAppCodeConfig(
+        app_name=app_name,
+        python_version=python_version,
+        model_requirements=model_requirements,
+        extra_pip_packages=extra_pip_packages,
+        pip_index_url=pip_index_url,
+        pip_extra_index_url=pip_extra_index_url,
+        gpu_config=gpu_config,
+        concurrent_inputs=concurrent_inputs,
+        target_inputs=target_inputs,
+        memory=memory,
+        cpu=cpu,
+        timeout=timeout,
+        min_containers=min_containers,
+        max_containers=max_containers,
+        buffer_containers=buffer_containers,
+        scaledown_window=scaledown_window,
+        startup_timeout=startup_timeout,
+        modal_secret=modal_secret,
+        wheel_filenames=wheel_filenames,
+        enable_batching=enable_batching,
+        max_batch_size=max_batch_size,
+        batch_wait_ms=batch_wait_ms,
+        proxy_auth=proxy_auth,
+    )
 
-    # Build concurrent decorator for class level (Modal 1.0+ pattern)
-    concurrent_decorator_line = ""
-    if concurrent_inputs > 1 or target_inputs is not None:
-        concurrent_args = []
-        if concurrent_inputs > 1:
-            concurrent_args.append(f"max_inputs={concurrent_inputs}")
-        if target_inputs is not None:
-            concurrent_args.append(f"target_inputs={target_inputs}")
-        concurrent_decorator_line = f"@modal.concurrent({', '.join(concurrent_args)})\n"
 
-    # Build secret reference if specified (escape for safe code generation)
-    secret_str = ""
-    secrets_arg = ""
-    if modal_secret:
-        secret_str = f'pip_secret = modal.Secret.from_name("{_escape_string_for_codegen(modal_secret)}")\n'
-        secrets_arg = "secrets=[pip_secret],"
+def _generate_modal_app_code(
+    app_name: str,
+    config: dict[str, Any],
+    model_requirements: list[str] | None = None,
+    wheel_filenames: list[str] | None = None,
+) -> str:
+    """
+    Generate Modal app Python code for serving an MLflow model.
 
-    code = f'''"""
-Modal app for serving MLflow model: {app_name}
-Auto-generated by mlflow-modal plugin
-"""
-import modal
-
-app = modal.App("{app_name}")
-
-model_volume = modal.Volume.from_name("{app_name}-model-volume", create_if_missing=True)
-MODEL_DIR = "/model"
-{secret_str}
-image = (
-    modal.Image.debian_slim(python_version="{python_version}")
-    .uv_pip_install({uv_pip_install_str}{pip_install_kwargs_str})
-)
-
-@app.cls(
-    image=image,
-    gpu={gpu_str},
-    memory={memory},
-    cpu={cpu},
-    timeout={timeout},
-    {scaling_str}
-    {secrets_arg}
-    volumes={{MODEL_DIR: model_volume}},
-)
-{concurrent_decorator_line}class MLflowModel:
-    @modal.enter()
-    def load_model(self):
-        import mlflow.pyfunc
-        model_volume.reload()
-{wheel_install_code}
-        self.model = mlflow.pyfunc.load_model(MODEL_DIR)
-
-'''
-
-    if enable_batching:
-        code += f"""
-    @modal.batched(max_batch_size={max_batch_size}, wait_ms={batch_wait_ms})
-    def predict_batch(self, inputs: list[dict]) -> list[dict]:
-        import pandas as pd
-        results = []
-        for input_data in inputs:
-            df = pd.DataFrame(input_data)
-            prediction = self.model.predict(df)
-            results.append({{"predictions": prediction.tolist()}})
-        return results
-
-    @modal.fastapi_endpoint(method="POST")
-    def predict(self, input_data: dict) -> dict:
-        return self.predict_batch.local([input_data])[0]
-"""
-    else:
-        code += """
-    @modal.fastapi_endpoint(method="POST")
-    def predict(self, input_data: dict) -> dict:
-        import pandas as pd
-        df = pd.DataFrame(input_data)
-        prediction = self.model.predict(df)
-        return {"predictions": prediction.tolist()}
-"""
-
-    # Add streaming endpoint for LLM-style models
-    code += """
-    @modal.fastapi_endpoint(method="POST")
-    def predict_stream(self, input_data: dict):
-        from fastapi.responses import StreamingResponse
-        import json
-
-        def generate():
-            # Try streaming prediction first, fall back to regular prediction
-            try:
-                if hasattr(self.model, 'predict_stream'):
-                    for chunk in self.model.predict_stream(input_data):
-                        yield f"data: {json.dumps(chunk)}\\n\\n"
-                    yield "data: [DONE]\\n\\n"
-                    return
-            except Exception:
-                # Model doesn't support streaming, fall back to regular prediction
-                pass
-
-            # Fall back to regular prediction for non-streaming models
-            import pandas as pd
-            df = pd.DataFrame(input_data)
-            prediction = self.model.predict(df)
-            yield f"data: {json.dumps({'predictions': prediction.tolist()})}\\n\\n"
-            yield "data: [DONE]\\n\\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-"""
-
-    return code
+    Args:
+        app_name: Name of the Modal app
+        config: Deployment configuration
+        model_requirements: List of pip requirements
+        wheel_filenames: List of wheel filenames (just names, not paths) to install from volume
+    """
+    codegen_config = _build_modal_app_codegen_config(
+        app_name=app_name,
+        config=config,
+        model_requirements=model_requirements,
+        wheel_filenames=wheel_filenames,
+    )
+    return generate_modal_app_code(codegen_config)
 
 
 class ModalDeploymentClient(BaseDeploymentClient):
@@ -499,6 +383,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
             "pip_index_url": None,
             "pip_extra_index_url": None,
             "modal_secret": None,
+            "proxy_auth": False,
         }
 
     def _validate_gpu_config(self, gpu_config: str | list[str]) -> None:
@@ -548,7 +433,10 @@ class ModalDeploymentClient(BaseDeploymentClient):
             "target_inputs",
         }
         float_fields = {"cpu"}
-        bool_fields = {"enable_batching"}
+        bool_fields = {
+            "enable_batching",
+            "proxy_auth",
+        }
 
         for key, value in custom_config.items():
             if key not in config:
@@ -598,6 +486,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
                 - concurrent_inputs: Max concurrent inputs per container (default: 1)
                 - min_containers: Minimum containers (default: 0)
                 - max_containers: Maximum containers (default: None)
+                - proxy_auth: Enable proxy authentication in modal's ENDPOINT URL (default: False)
                 - python_version: Python version (default: auto-detect)
             endpoint: Unused, kept for API compatibility
 
@@ -811,6 +700,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
         deployment_name: str | None = None,
         inputs: Any = None,
         endpoint: str | None = None,
+        proxy_auth_enabled: bool = False,
     ) -> PredictionsResponse:
         """Make predictions using a deployed Modal model."""
         if deployment_name is None:
@@ -838,16 +728,26 @@ class ModalDeploymentClient(BaseDeploymentClient):
                 error_code=RESOURCE_DOES_NOT_EXIST,
             )
 
-        response = requests.post(endpoint_url, json=inputs, timeout=300)
+        proxy_auth_headers = self._build_proxy_auth_headers(proxy_auth_enabled)
+        response = requests.post(endpoint_url, json=inputs, timeout=300, headers=proxy_auth_headers)
+
         response.raise_for_status()
 
         return PredictionsResponse(predictions=response.json())
+
+    def _build_proxy_auth_headers(self, proxy_auth_enabled) -> dict[str, str]:
+        headers = {}
+        if proxy_auth_enabled:
+            headers["Modal-Key"] = os.environ.get("PROXY_AUTH_TOKEN_ID")
+            headers["Modal-Secret"] = os.environ.get("PROXY_AUTH_TOKEN_SECRET")
+        return headers
 
     def predict_stream(
         self,
         deployment_name: str | None = None,
         inputs: dict[str, Any] | None = None,
         endpoint: str | None = None,
+        proxy_auth_enabled: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """
         Stream predictions from a deployed Modal model.
@@ -917,11 +817,12 @@ class ModalDeploymentClient(BaseDeploymentClient):
             )
 
         # Make streaming request
+        proxy_auth_headers = self._build_proxy_auth_headers(proxy_auth_enabled)
         with requests.post(
             stream_url,
             json=inputs,
             stream=True,
-            headers={"Accept": "text/event-stream"},
+            headers={"Accept": "text/event-stream", **proxy_auth_headers},
             timeout=300,
         ) as response:
             response.raise_for_status()
@@ -1025,6 +926,7 @@ def target_help() -> str:
     - ``memory``: Memory allocation in MB (default: 512)
     - ``cpu``: CPU cores (default: 1.0)
     - ``timeout``: Request timeout in seconds (default: 300)
+    - ``proxy_auth``: Enable proxy authentication in modal's ENDPOINT URL (default: False)
 
     Scaling Configuration:
     - ``min_containers``: Minimum containers to keep warm (default: 0)
