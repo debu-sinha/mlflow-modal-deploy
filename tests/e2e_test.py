@@ -26,6 +26,7 @@ import sys
 import time
 
 import mlflow
+import requests
 from dotenv import load_dotenv
 from mlflow.deployments import get_deploy_client
 from sklearn.datasets import load_iris
@@ -65,8 +66,11 @@ def make_prediction(endpoint_url: str, max_attempts: int = 3, headers: dict | No
             response = requests.post(endpoint_url, json=sample_data, timeout=180, headers=headers)
             response.raise_for_status()
             return response.json()
+
         except Exception as e:
-            if attempt < max_attempts - 1:
+            if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+                raise e  # re-raise for other HTTP errors
+            elif attempt < max_attempts - 1:
                 print(f"    Attempt {attempt + 1} failed, retrying in 15s...")
                 time.sleep(15)
             else:
@@ -157,16 +161,13 @@ def test_proxy_auth(run_id: str) -> bool:
             name=deployment_name,
             model_uri=f"runs:/{run_id}/model",
             config={
-                "memory": 1024,
+                "memory": 512,
                 "timeout": 120,
                 "scaledown_window": 60,
                 "extra_pip_packages": ["structlog>=24.0"],
                 "proxy_auth": True,
             },
         )
-
-        print("  Deployment successful!")
-        print(f"  Endpoint URL: {deployment.get('endpoint_url')}")
 
         # Verify config
         config = deployment.get("config", {})
@@ -178,24 +179,32 @@ def test_proxy_auth(run_id: str) -> bool:
 
         # Make prediction
         endpoint_url = deployment.get("endpoint_url")
-        if endpoint_url:
-            print("  Testing prediction...")
-            import pytest
-            import requests
+        print(f"  Endpoint URL: {endpoint_url}")
 
-            with pytest.raises(requests.HTTPError):
-                result = make_prediction(endpoint_url)  # expected to raise 401
-                if result.status_code == 200:
-                    return False
-
-            result = make_prediction(endpoint_url, headers=headers)
-            if result.status_code != 200:
-                return False
-
-            if result:
-                print(f"  Prediction successful: {result}")
+        print("  Testing prediction...")
+        try:
+            result = make_prediction(endpoint_url)  # expected to raise 401
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                print("  Prediction without authentication denied")
             else:
-                print("  Prediction timed out, but deployment was created")
+                print(f"  Prediction error, expected 401: {e}")
+                return False
+        else:
+            print(f"  Prediction error, expected 401 but got {result}")
+            return False
+
+        try:
+            result = make_prediction(endpoint_url, headers=headers)
+        except requests.exceptions.HTTPError as e:
+            print(f"  Prediction error, expected 200: {e}")
+            return False
+        else:
+            print(f"  Prediction successful: {result}")
+
+        if not result:
+            print("  Prediction timed out, but deployment was created")
+            return False
 
         return True
 
