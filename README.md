@@ -31,12 +31,8 @@ pip install mlflow-modal-deploy
 
 ## How it Works
 
-```mermaid
-flowchart LR
-    A[MLflow Model] --> B[Extract Dependencies]
-    B --> C[Modal Volume]
-    C --> D[Generate Modal App]
-    D --> E[HTTPS Endpoint]
+```
+MLflow Model -> Extract Dependencies -> Modal Volume -> Generate Modal App -> HTTPS Endpoint
 ```
 
 1. **Extract**: MLflow model artifacts and dependencies are extracted from the model URI
