@@ -52,6 +52,7 @@ SUPPORTED_GPUS = [
     "H100",
     "H200",
     "B200",
+    "RTX-PRO-6000",
 ]
 
 
@@ -365,7 +366,7 @@ image = (
         for input_data in inputs:
             df = pd.DataFrame(input_data)
             prediction = self.model.predict(df)
-            results.append({{"predictions": prediction.tolist()}})
+            results.append({{"predictions": prediction.tolist() if hasattr(prediction, 'tolist') else list(prediction)}})
         return results
 
     @modal.fastapi_endpoint(method="POST")
@@ -379,7 +380,7 @@ image = (
         import pandas as pd
         df = pd.DataFrame(input_data)
         prediction = self.model.predict(df)
-        return {"predictions": prediction.tolist()}
+        return {"predictions": prediction.tolist() if hasattr(prediction, "tolist") else list(prediction)}
 """
 
     # Add streaming endpoint for LLM-style models
@@ -405,7 +406,7 @@ image = (
             import pandas as pd
             df = pd.DataFrame(input_data)
             prediction = self.model.predict(df)
-            yield f"data: {json.dumps({'predictions': prediction.tolist()})}\\n\\n"
+            yield f"data: {json.dumps({'predictions': prediction.tolist() if hasattr(prediction, 'tolist') else list(prediction)})}\\n\\n"
             yield "data: [DONE]\\n\\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
@@ -506,7 +507,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
 
         def validate_single_gpu(gpu: str) -> None:
             # Extract base GPU type from multi-GPU syntax (e.g., "H100:8" -> "H100")
-            base_gpu = gpu.split(":")[0].rstrip("!")
+            base_gpu = gpu.split(":")[0].rstrip("!+")
             if base_gpu not in SUPPORTED_GPUS:
                 raise MlflowException(
                     f"Unsupported GPU type: {gpu}. Supported: {SUPPORTED_GPUS}",
@@ -757,7 +758,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
         except Exception as e:
             _logger.debug(f"Could not delete volume {volume_name}: {e}")
 
-        if result.returncode != 0 and "not found" not in result.stderr.lower():
+        if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
             raise MlflowException(
                 f"Failed to delete Modal app: {result.stderr}",
                 error_code=INVALID_PARAMETER_VALUE,
@@ -1020,8 +1021,9 @@ def target_help() -> str:
     Pass these options via the ``config`` parameter in create_deployment():
 
     Resource Configuration:
-    - ``gpu``: GPU type (T4, L4, L40S, A10, A100, A100-40GB, A100-80GB, H100, H200, B200)
-              Supports multi-GPU ("H100:8") and fallback lists (["H100", "A100"])
+    - ``gpu``: GPU type (T4, L4, L40S, A10, A100, A100-40GB, A100-80GB, H100, H200, B200, RTX-PRO-6000)
+              Supports multi-GPU ("H100:8"), fallback lists (["H100", "A100"]),
+              dedicated suffix ("H100!"), and upgrade suffix ("B200+")
     - ``memory``: Memory allocation in MB (default: 512)
     - ``cpu``: CPU cores (default: 1.0)
     - ``timeout``: Request timeout in seconds (default: 300)

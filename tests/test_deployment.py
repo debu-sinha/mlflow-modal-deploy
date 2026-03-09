@@ -32,7 +32,8 @@ class TestModuleExports:
 
 class TestSupportedGPUs:
     @pytest.mark.parametrize(
-        "gpu", ["T4", "L4", "L40S", "A10", "A100", "A100-40GB", "A100-80GB", "H100", "H200", "B200"]
+        "gpu",
+        ["T4", "L4", "L40S", "A10", "A100", "A100-40GB", "A100-80GB", "H100", "H200", "B200", "RTX-PRO-6000"],
     )
     def test_gpu_in_supported_list(self, gpu):
         assert gpu in SUPPORTED_GPUS
@@ -146,6 +147,27 @@ class TestConfigValidation:
 
         result = client._apply_custom_config(base_config, {"gpu": "H100!"})
         assert result["gpu"] == "H100!"
+
+    def test_upgrade_gpu_suffix_accepted(self):
+        client = ModalDeploymentClient("modal")
+        base_config = client._default_deployment_config()
+
+        result = client._apply_custom_config(base_config, {"gpu": "B200+"})
+        assert result["gpu"] == "B200+"
+
+    def test_upgrade_gpu_suffix_with_count_accepted(self):
+        client = ModalDeploymentClient("modal")
+        base_config = client._default_deployment_config()
+
+        result = client._apply_custom_config(base_config, {"gpu": "B200+:4"})
+        assert result["gpu"] == "B200+:4"
+
+    def test_rtx_pro_6000_accepted(self):
+        client = ModalDeploymentClient("modal")
+        base_config = client._default_deployment_config()
+
+        result = client._apply_custom_config(base_config, {"gpu": "RTX-PRO-6000"})
+        assert result["gpu"] == "RTX-PRO-6000"
 
 
 class TestModelRequirements:

@@ -1789,7 +1789,7 @@ wheels = [
 
 [[package]]
 name = "mlflow-modal-deploy"
-version = "0.6.0"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "mlflow" },
