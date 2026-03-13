@@ -289,10 +289,10 @@ model/
 └── ...
 ```
 
-### Deploying with Proxy Authentication Enableed
+### Deploying with Proxy Authentication Enabled
 Enables [proxy authentication](https://modal.com/docs/guide/webhook-proxy-auth#proxy-auth-tokens) in modal's ENDPOINT URL.
 
-Apps deployed without proxy authentication enabled are public to anyone with knowledge of the endpoint to make api requests, it can be hit by any client over the Internet. With proxy authentication enabled, Modal`s authentication feature only allow users with access to make requests.
+Apps deployed without proxy authentication enabled are public to anyone with knowledge of the endpoint to make api requests, it can be hit by any client over the Internet. With proxy authentication enabled, Modal's authentication feature only allows users with access to make requests.
 
 ```python
 # Deploy model
