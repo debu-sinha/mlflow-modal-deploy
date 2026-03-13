@@ -54,6 +54,7 @@ SUPPORTED_GPUS = [
     "H100",
     "H200",
     "B200",
+    "RTX-PRO-6000",
 ]
 
 
@@ -379,7 +380,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
 
         def validate_single_gpu(gpu: str) -> None:
             # Extract base GPU type from multi-GPU syntax (e.g., "H100:8" -> "H100")
-            base_gpu = gpu.split(":")[0].rstrip("!")
+            base_gpu = gpu.split(":")[0].rstrip("!+")
             if base_gpu not in SUPPORTED_GPUS:
                 raise MlflowException(
                     f"Unsupported GPU type: {gpu}. Supported: {SUPPORTED_GPUS}",
@@ -636,7 +637,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
         except Exception as e:
             _logger.debug(f"Could not delete volume {volume_name}: {e}")
 
-        if result.returncode != 0 and "not found" not in result.stderr.lower():
+        if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
             raise MlflowException(
                 f"Failed to delete Modal app: {result.stderr}",
                 error_code=INVALID_PARAMETER_VALUE,

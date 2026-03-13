@@ -191,7 +191,7 @@ for whl in wheel_files:
         for input_data in inputs:
             df = pd.DataFrame(input_data)
             prediction = self.model.predict(df)
-            results.append({{"predictions": prediction.tolist()}})
+            results.append({{"predictions": prediction.tolist() if hasattr(prediction, 'tolist') else list(prediction)}})
         return results
 
     {self._render_fastapi_endpoint_decorator()}
@@ -205,7 +205,7 @@ for whl in wheel_files:
         import pandas as pd
         df = pd.DataFrame(input_data)
         prediction = self.model.predict(df)
-        return {{"predictions": prediction.tolist()}}
+         return {{"predictions": prediction.tolist() if hasattr(prediction, "tolist") else list(prediction)}}
 """
 
     def _render_fastapi_endpoint_decorator(self) -> str:
@@ -248,7 +248,7 @@ for whl in wheel_files:
             import pandas as pd
             df = pd.DataFrame(input_data)
             prediction = self.model.predict(df)
-            yield f"data: {{json.dumps({{'predictions': prediction.tolist()}})}}\\n\\n"
+            yield f"data: {{json.dumps({{'predictions': prediction.tolist() if hasattr(prediction, 'tolist') else list(prediction)}})}}\\n\\n"
             yield "data: [DONE]\\n\\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
