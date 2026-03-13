@@ -69,7 +69,7 @@ def make_prediction(endpoint_url: str, max_attempts: int = 3, headers: dict | No
 
         except Exception as e:
             if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
-                raise e  # re-raise for other HTTP errors
+                raise e  # re-raise 401 for auth validation
             elif attempt < max_attempts - 1:
                 print(f"    Attempt {attempt + 1} failed, retrying in 15s...")
                 time.sleep(15)
@@ -145,13 +145,15 @@ def test_proxy_auth(run_id: str) -> bool:
         "Modal-Key": os.environ.get("PROXY_AUTH_TOKEN_ID"),
         "Modal-Secret": os.environ.get("PROXY_AUTH_TOKEN_SECRET"),
     }
-    if not headers["Modal-Key"] or not headers["Modal-Secret"]:
+    if not headers["Modal-Key"]:
         print(
             "PROXY_AUTH_TOKEN_ID is not set. Run 'modal token new' to create a new token and add environment variables to your shell. See .env.example for an example."
         )
+    if not headers["Modal-Secret"]:
         print(
             "PROXY_AUTH_TOKEN_SECRET is not set. Run 'modal token new' to create a new token and add environment variables to your shell. See .env.example for an example."
         )
+    if not headers["Modal-Key"] or not headers["Modal-Secret"]:
         return False
     client = get_deploy_client("modal")
     deployment_name = "e2e-test-proxy-auth"
