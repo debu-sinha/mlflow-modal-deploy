@@ -206,11 +206,6 @@ def _sanitize_deployment_name(name: str) -> str:
     return name
 
 
-def _escape_string_for_codegen(value: str) -> str:
-    """Escape a string for safe inclusion in generated Python code."""
-    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-
-
 def _build_modal_app_codegen_config(
     app_name: str,
     config: dict[str, Any],
@@ -239,13 +234,6 @@ def _build_modal_app_codegen_config(
     min_containers = config.get("min_containers", _DEFAULT_MIN_CONTAINERS)
     max_containers = config.get("max_containers")
     proxy_auth = config.get("proxy_auth", False)
-
-    # Escape URLs for safe code generation
-    pip_index_url = _escape_string_for_codegen(pip_index_url) if pip_index_url else None
-    pip_extra_index_url = _escape_string_for_codegen(pip_extra_index_url) if pip_extra_index_url else None
-
-    # Parse secret name for safe code generation
-    modal_secret = _escape_string_for_codegen(modal_secret) if modal_secret else None
 
     return ModalAppCodeConfig(
         app_name=app_name,

@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def _escape_string_for_codegen(value: str) -> str:
+    """Escape a string for safe inclusion in generated Python code."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 @dataclass
 class ModalAppCodeConfig:
     """Configuration for generating the Modal app source code."""
@@ -87,13 +92,13 @@ image = (
 '''
 
     def _render_pip_install_kwargs(self) -> str:
-        """Build pip install kwargs for private repos ."""
+        """Build pip install kwargs for private repos."""
         c = self._config
         pip_install_kwargs = []
         if c.pip_index_url:
-            pip_install_kwargs.append(f'index_url="{c.pip_index_url}"')
+            pip_install_kwargs.append(f'index_url="{_escape_string_for_codegen(c.pip_index_url)}"')
         if c.pip_extra_index_url:
-            pip_install_kwargs.append(f'extra_index_url="{c.pip_extra_index_url}"')
+            pip_install_kwargs.append(f'extra_index_url="{_escape_string_for_codegen(c.pip_extra_index_url)}"')
 
         pip_install_kwargs_str = ", ".join(pip_install_kwargs)
         if pip_install_kwargs_str:
@@ -216,7 +221,7 @@ for whl in wheel_files:
         secret_str = ""
         secrets_arg = ""
         if c.modal_secret:
-            secret_str = f'pip_secret = modal.Secret.from_name("{c.modal_secret}")\n'
+            secret_str = f'pip_secret = modal.Secret.from_name("{_escape_string_for_codegen(c.modal_secret)}")\n'
             secrets_arg = "secrets=[pip_secret],"
         return secret_str, secrets_arg
 
