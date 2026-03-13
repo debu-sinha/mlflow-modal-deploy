@@ -309,8 +309,8 @@ client.create_deployment(
 import os
 
 # Set an environment variable (if are not set)
-os.environ['PROXY_TOKEN_ID'] = 'your_api_key_here'
-os.environ['PROXY_TOKEN_SECRET'] = 'your_secret_here'
+os.environ['PROXY_AUTH_TOKEN_ID'] = 'your_api_key_here'
+os.environ['PROXY_AUTH_TOKEN_SECRET'] = 'your_secret_here'
 
 # Make predictions
 predictions = client.predict(
@@ -323,10 +323,10 @@ predictions = client.predict(
 or
 
 ```sh
-export PROXY_TOKEN_ID=your_api_key_here
-export PROXY_TOKEN_SECRET=your_secret_here
-curl -H "Modal-Key: $PROXY_TOKEN_ID" \
-     -H "Modal-Secret: $PROXY_TOKEN_SECRET" \
+export PROXY_AUTH_TOKEN_ID=your_api_key_here
+export PROXY_AUTH_TOKEN_SECRET=your_secret_here
+curl -H "Modal-Key: $PROXY_AUTH_TOKEN_ID" \
+     -H "Modal-Secret: $PROXY_AUTH_TOKEN_SECRET" \
      https://private-url--goes-here.modal.run
 ```
 
