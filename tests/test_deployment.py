@@ -3,10 +3,10 @@
 import pytest
 
 import mlflow_modal
+from mlflow_modal.codegen import _escape_string_for_codegen
 from mlflow_modal.deployment import (
     SUPPORTED_GPUS,
     ModalDeploymentClient,
-    _escape_string_for_codegen,
     _generate_modal_app_code,
     _get_model_python_version,
     _get_model_requirements,
