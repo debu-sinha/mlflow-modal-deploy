@@ -737,12 +737,23 @@ class ModalDeploymentClient(BaseDeploymentClient):
 
         return PredictionsResponse(predictions=response.json())
 
-    def _build_proxy_auth_headers(self, proxy_auth_enabled) -> dict[str, str]:
-        headers = {}
-        if proxy_auth_enabled:
-            headers["Modal-Key"] = os.environ.get("PROXY_AUTH_TOKEN_ID")
-            headers["Modal-Secret"] = os.environ.get("PROXY_AUTH_TOKEN_SECRET")
-        return headers
+    def _build_proxy_auth_headers(self, proxy_auth_enabled: bool) -> dict[str, str]:
+        if not proxy_auth_enabled:
+            return {}
+        token_id = os.environ.get("PROXY_AUTH_TOKEN_ID")
+        token_secret = os.environ.get("PROXY_AUTH_TOKEN_SECRET")
+        if not token_id or not token_secret:
+            missing = []
+            if not token_id:
+                missing.append("PROXY_AUTH_TOKEN_ID")
+            if not token_secret:
+                missing.append("PROXY_AUTH_TOKEN_SECRET")
+            raise MlflowException(
+                f"Proxy auth is enabled but the following environment variables are not set: {', '.join(missing)}. "
+                "Run 'modal token new' to create a new token.",
+                error_code=INVALID_PARAMETER_VALUE,
+            )
+        return {"Modal-Key": token_id, "Modal-Secret": token_secret}
 
     def predict_stream(
         self,
