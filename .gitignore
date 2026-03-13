@@ -72,4 +72,6 @@ Thumbs.db
 
 # MLflow test artifacts
 mlruns/
+mlruns-blog/
 mlflow.db
+mlflow-blog.db

@@ -922,8 +922,9 @@ def target_help() -> str:
     Pass these options via the ``config`` parameter in create_deployment():
 
     Resource Configuration:
-    - ``gpu``: GPU type (T4, L4, L40S, A10, A100, A100-40GB, A100-80GB, H100, H200, B200)
-              Supports multi-GPU ("H100:8") and fallback lists (["H100", "A100"])
+    - ``gpu``: GPU type (T4, L4, L40S, A10, A100, A100-40GB, A100-80GB, H100, H200, B200, RTX-PRO-6000)
+              Supports multi-GPU ("H100:8"), fallback lists (["H100", "A100"]),
+              dedicated suffix ("H100!"), and upgrade suffix ("B200+")
     - ``memory``: Memory allocation in MB (default: 512)
     - ``cpu``: CPU cores (default: 1.0)
     - ``timeout``: Request timeout in seconds (default: 300)
