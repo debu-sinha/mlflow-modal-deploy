@@ -690,7 +690,6 @@ class ModalDeploymentClient(BaseDeploymentClient):
         deployment_name: str | None = None,
         inputs: Any = None,
         endpoint: str | None = None,
-        proxy_auth_enabled: bool = False,
     ) -> PredictionsResponse:
         """Make predictions using a deployed Modal model."""
         if deployment_name is None:
@@ -718,14 +717,15 @@ class ModalDeploymentClient(BaseDeploymentClient):
                 error_code=RESOURCE_DOES_NOT_EXIST,
             )
 
-        proxy_auth_headers = self._build_proxy_auth_headers(proxy_auth_enabled)
+        proxy_auth_headers = self._build_proxy_auth_headers(deployment_name)
         response = requests.post(endpoint_url, json=inputs, timeout=300, headers=proxy_auth_headers)
 
         response.raise_for_status()
 
         return PredictionsResponse(predictions=response.json())
 
-    def _build_proxy_auth_headers(self, proxy_auth_enabled: bool) -> dict[str, str]:
+    def _build_proxy_auth_headers(self, deployment_name: str) -> dict[str, str]:
+        proxy_auth_enabled = self.get_deployment(deployment_name).get("config", {}).get("proxy_auth", False)
         if not proxy_auth_enabled:
             return {}
         token_id = os.environ.get("PROXY_AUTH_TOKEN_ID")
@@ -748,7 +748,6 @@ class ModalDeploymentClient(BaseDeploymentClient):
         deployment_name: str | None = None,
         inputs: dict[str, Any] | None = None,
         endpoint: str | None = None,
-        proxy_auth_enabled: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """
         Stream predictions from a deployed Modal model.
@@ -818,7 +817,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
             )
 
         # Make streaming request
-        proxy_auth_headers = self._build_proxy_auth_headers(proxy_auth_enabled)
+        proxy_auth_headers = self._build_proxy_auth_headers(deployment_name)
         with requests.post(
             stream_url,
             json=inputs,
