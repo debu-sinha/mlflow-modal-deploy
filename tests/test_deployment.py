@@ -746,6 +746,62 @@ class TestAppCodeGenerationEdgeCases:
         assert '"transformers>=4.30"' in code
 
 
+class TestGeneratedCodeSyntax:
+    """Validate that all generated code is syntactically valid Python.
+
+    This catches indentation errors, unclosed brackets, and other issues
+    that string-presence assertions miss.
+    """
+
+    @pytest.mark.parametrize(
+        "config_overrides",
+        [
+            {},
+            {"enable_batching": True, "max_batch_size": 16},
+            {"gpu": "T4"},
+            {"gpu": ["H100", "A100-80GB"]},
+            {"modal_secret": "pip-credentials"},
+            {"concurrent_inputs": 5},
+            {"wheel_filenames": ["pkg.whl"]},
+            {"pip_index_url": "https://pypi.example.com/simple/"},
+            {"min_containers": 2, "max_containers": 10, "scaledown_window": 120},
+        ],
+        ids=[
+            "defaults",
+            "batching",
+            "single_gpu",
+            "multi_gpu",
+            "secret",
+            "concurrent",
+            "wheels",
+            "pip_index",
+            "scaling",
+        ],
+    )
+    def test_generated_code_is_valid_python(self, config_overrides):
+        import ast
+
+        base_config = {
+            "gpu": None,
+            "memory": 512,
+            "cpu": 1.0,
+            "timeout": 300,
+            "scaledown_window": 60,
+            "enable_batching": False,
+            "python_version": "3.10",
+            "min_containers": 0,
+            "max_containers": None,
+            "concurrent_inputs": 1,
+        }
+        base_config.update(config_overrides)
+
+        code = _generate_modal_app_code("syntax-test", base_config)
+
+        # This will raise SyntaxError if the generated code has
+        # indentation issues, unclosed brackets, or other syntax problems
+        ast.parse(code)
+
+
 class TestExtraPipPackagesConfig:
     def test_extra_pip_packages_in_default_config(self):
         client = ModalDeploymentClient("modal")

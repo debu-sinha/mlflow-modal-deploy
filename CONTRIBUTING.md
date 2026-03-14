@@ -83,6 +83,7 @@ TEST_MODAL_INTEGRATION=1 uv run pytest tests/ -v -m integration
 - Use real library classes where possible
 - Use `@pytest.mark.parametrize` for similar test patterns
 - Assert specific expected values, not just existence
+- **Codegen changes**: Any change to generated Modal app code must pass the `TestGeneratedCodeSyntax` suite, which runs `ast.parse()` on all generated code variants to catch indentation and syntax errors that string assertions miss
 
 ## Pull Request Process
 
