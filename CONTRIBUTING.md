@@ -39,14 +39,17 @@ uv run pre-commit install
 
 - **Line length**: 120 characters
 - **Python version**: 3.10+
-- **Linter/Formatter**: Ruff
+- **Linter/Formatter**: Ruff (rules: E, F, I, W, B, C4, UP, SIM, PIE, RUF)
+- **Type checking**: mypy (strict on src/)
+- **Spell checking**: codespell
 - **Docstrings**: Google style (only when providing additional context)
 
-Run linting:
+Run all checks:
 
 ```bash
 uv run ruff check src/ tests/
 uv run ruff format src/ tests/
+uv run mypy src/
 ```
 
 ## Testing
@@ -102,9 +105,11 @@ TEST_MODAL_INTEGRATION=1 uv run pytest tests/ -v -m integration
 
 ### PR Requirements
 
-- All tests pass
-- Linting passes
-- Code coverage maintained or improved
+- All tests pass across Python 3.10-3.13
+- Ruff lint and format checks pass
+- mypy type checking passes on src/
+- Code coverage maintained or improved (minimum 55%)
+- Codegen changes must pass `TestGeneratedCodeSyntax` (validates generated code with `ast.parse()`)
 - Documentation updated if needed
 
 ## Issue Guidelines
@@ -134,8 +139,9 @@ Releases are automated via GitHub Actions with trusted publishing to PyPI.
 
 Before creating a release, verify:
 
-- [ ] All tests pass locally: `uv run pytest tests/ -v`
+- [ ] All tests pass locally: `uv run pytest tests/ -v --cov=mlflow_modal --cov-fail-under=55`
 - [ ] Pre-commit hooks pass: `uv run pre-commit run --all-files`
+- [ ] Type checking passes: `uv run mypy src/`
 - [ ] Version bumped in both files:
   - `pyproject.toml`
   - `src/mlflow_modal/__init__.py`

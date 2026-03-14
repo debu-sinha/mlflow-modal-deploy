@@ -14,8 +14,8 @@ from mlflow_modal.deployment import (
 
 __version__ = "0.6.2"
 __all__ = [
+    "SUPPORTED_GPUS",
     "ModalDeploymentClient",
     "run_local",
     "target_help",
-    "SUPPORTED_GPUS",
 ]
