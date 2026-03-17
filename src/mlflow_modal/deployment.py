@@ -5,6 +5,7 @@ This module provides the ModalDeploymentClient class for deploying
 MLflow models to Modal's serverless infrastructure.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -82,10 +83,15 @@ def _get_model_requirements(model_path: str) -> tuple[list[str], list[str]]:
         with open(req_file) as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith("#") and not line.lower().startswith("mlflow"):
-                    # Skip wheel references - we handle them separately
-                    if not line.endswith(".whl") and "code/" not in line:
-                        requirements.append(line)
+                # Skip wheel references - we handle them separately
+                if (
+                    line
+                    and not line.startswith("#")
+                    and not line.lower().startswith("mlflow")
+                    and not line.endswith(".whl")
+                    and "code/" not in line
+                ):
+                    requirements.append(line)
         return requirements, wheel_files
 
     conda_file = os.path.join(model_path, "conda.yaml")
@@ -102,9 +108,8 @@ def _get_model_requirements(model_path: str) -> tuple[list[str], list[str]]:
                         for pip_dep in dep["pip"]
                         if not pip_dep.lower().startswith("mlflow") and not pip_dep.endswith(".whl")
                     )
-                elif isinstance(dep, str) and not dep.startswith("python"):
-                    if not dep.lower().startswith("mlflow"):
-                        requirements.append(dep)
+                elif isinstance(dep, str) and not dep.startswith("python") and not dep.lower().startswith("mlflow"):
+                    requirements.append(dep)
         except Exception as e:
             _logger.warning(f"Failed to parse conda.yaml: {e}")
     return requirements, wheel_files
@@ -135,10 +140,8 @@ def _clear_volume(modal, volume_name: str) -> None:
     try:
         volume = modal.Volume.from_name(volume_name)
         for entry in volume.listdir("/"):
-            try:
+            with contextlib.suppress(Exception):
                 volume.remove_file(f"/{entry.path}")
-            except Exception:
-                pass
         _logger.info(f"Cleared volume: {volume_name}")
     except Exception as e:
         _logger.debug(f"Could not clear volume {volume_name}: {e}")
@@ -619,7 +622,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
             )
         return self.create_deployment(name, model_uri, flavor, config, endpoint)
 
-    def delete_deployment(self, name: str, endpoint: str | None = None) -> dict[str, Any]:
+    def delete_deployment(self, name: str, endpoint: str | None = None) -> dict[str, Any]:  # type: ignore[override]
         """Delete a Modal deployment."""
         modal = _import_modal()
 

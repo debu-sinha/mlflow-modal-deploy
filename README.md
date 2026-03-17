@@ -6,6 +6,7 @@
 [![Downloads](https://static.pepy.tech/badge/mlflow-modal-deploy)](https://pepy.tech/project/mlflow-modal-deploy)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10-3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
+[![codecov](https://codecov.io/gh/debu-sinha/mlflow-modal-deploy/branch/main/graph/badge.svg)](https://codecov.io/gh/debu-sinha/mlflow-modal-deploy)
 
 Deploy MLflow models to [Modal](https://modal.com)'s serverless GPU infrastructure with a single command.
 

@@ -215,7 +215,7 @@ dependencies:
         (code_dir / "my_package-1.0.0-py3-none-any.whl").write_text("fake wheel")
         (code_dir / "other_pkg-2.0.0-py3-none-any.whl").write_text("fake wheel")
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        _requirements, wheel_files = _get_model_requirements(str(tmp_path))
 
         assert len(wheel_files) == 2
         assert any("my_package" in w for w in wheel_files)
@@ -563,7 +563,7 @@ dependencies:
 """
         )
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        requirements, _wheel_files = _get_model_requirements(str(tmp_path))
 
         assert "numpy=1.24.0" in requirements
         assert "scipy" in requirements
@@ -581,7 +581,7 @@ dependencies:
 """
         )
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        requirements, _wheel_files = _get_model_requirements(str(tmp_path))
 
         assert "numpy==1.24.0" in requirements
         assert not any(".whl" in r for r in requirements)
@@ -590,7 +590,7 @@ dependencies:
         req_file = tmp_path / "requirements.txt"
         req_file.write_text("numpy==1.24.0\ncode/custom-1.0.0.whl\npandas")
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        requirements, _wheel_files = _get_model_requirements(str(tmp_path))
 
         assert "numpy==1.24.0" in requirements
         assert "pandas" in requirements
@@ -744,6 +744,62 @@ class TestAppCodeGenerationEdgeCases:
         assert '"numpy==1.24.0"' in code
         assert '"pandas>=2.0"' in code
         assert '"transformers>=4.30"' in code
+
+
+class TestGeneratedCodeSyntax:
+    """Validate that all generated code is syntactically valid Python.
+
+    This catches indentation errors, unclosed brackets, and other issues
+    that string-presence assertions miss.
+    """
+
+    @pytest.mark.parametrize(
+        "config_overrides",
+        [
+            {},
+            {"enable_batching": True, "max_batch_size": 16},
+            {"gpu": "T4"},
+            {"gpu": ["H100", "A100-80GB"]},
+            {"modal_secret": "pip-credentials"},
+            {"concurrent_inputs": 5},
+            {"wheel_filenames": ["pkg.whl"]},
+            {"pip_index_url": "https://pypi.example.com/simple/"},
+            {"min_containers": 2, "max_containers": 10, "scaledown_window": 120},
+        ],
+        ids=[
+            "defaults",
+            "batching",
+            "single_gpu",
+            "multi_gpu",
+            "secret",
+            "concurrent",
+            "wheels",
+            "pip_index",
+            "scaling",
+        ],
+    )
+    def test_generated_code_is_valid_python(self, config_overrides):
+        import ast
+
+        base_config = {
+            "gpu": None,
+            "memory": 512,
+            "cpu": 1.0,
+            "timeout": 300,
+            "scaledown_window": 60,
+            "enable_batching": False,
+            "python_version": "3.10",
+            "min_containers": 0,
+            "max_containers": None,
+            "concurrent_inputs": 1,
+        }
+        base_config.update(config_overrides)
+
+        code = _generate_modal_app_code("syntax-test", base_config)
+
+        # This will raise SyntaxError if the generated code has
+        # indentation issues, unclosed brackets, or other syntax problems
+        ast.parse(code)
 
 
 class TestExtraPipPackagesConfig:
@@ -1013,22 +1069,24 @@ class TestPredictStreamMethod:
         # Mock get_deployment to return a URL
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                # Mock streaming response
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [b"data: [DONE]"]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            # Mock streaming response
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [b"data: [DONE]"]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                # Consume the generator
-                list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            # Consume the generator
+            list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                # Verify URL was constructed correctly
-                mock_post.assert_called_once()
-                call_args = mock_post.call_args
-                assert call_args[0][0] == "https://test--app.modal.run/predict_stream"
+            # Verify URL was constructed correctly
+            mock_post.assert_called_once()
+            call_args = mock_post.call_args
+            assert call_args[0][0] == "https://test--app.modal.run/predict_stream"
 
     def test_predict_stream_parses_sse_format(self):
         from unittest.mock import MagicMock, patch
@@ -1037,25 +1095,27 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                # Mock streaming response with SSE data
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [
-                    b'data: {"chunk": 1, "text": "Hello"}',
-                    b'data: {"chunk": 2, "text": " World"}',
-                    b"data: [DONE]",
-                ]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            # Mock streaming response with SSE data
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [
+                b'data: {"chunk": 1, "text": "Hello"}',
+                b'data: {"chunk": 2, "text": " World"}',
+                b"data: [DONE]",
+            ]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                # Collect results
-                results = list(client.predict_stream(deployment_name="test", inputs={"prompt": "Hi"}))
+            # Collect results
+            results = list(client.predict_stream(deployment_name="test", inputs={"prompt": "Hi"}))
 
-                assert len(results) == 2
-                assert results[0] == {"chunk": 1, "text": "Hello"}
-                assert results[1] == {"chunk": 2, "text": " World"}
+            assert len(results) == 2
+            assert results[0] == {"chunk": 1, "text": "Hello"}
+            assert results[1] == {"chunk": 2, "text": " World"}
 
     def test_predict_stream_skips_empty_lines(self):
         from unittest.mock import MagicMock, patch
@@ -1064,23 +1124,25 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [
-                    b"",  # Empty line
-                    b'data: {"text": "test"}',
-                    b"",  # Another empty line
-                    b"data: [DONE]",
-                ]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [
+                b"",  # Empty line
+                b'data: {"text": "test"}',
+                b"",  # Another empty line
+                b"data: [DONE]",
+            ]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                assert len(results) == 1
-                assert results[0] == {"text": "test"}
+            assert len(results) == 1
+            assert results[0] == {"text": "test"}
 
     def test_predict_stream_skips_non_data_lines(self):
         from unittest.mock import MagicMock, patch
@@ -1089,23 +1151,25 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [
-                    b"event: message",  # Non-data line
-                    b'data: {"text": "test"}',
-                    b"id: 123",  # Another non-data line
-                    b"data: [DONE]",
-                ]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [
+                b"event: message",  # Non-data line
+                b'data: {"text": "test"}',
+                b"id: 123",  # Another non-data line
+                b"data: [DONE]",
+            ]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                assert len(results) == 1
-                assert results[0] == {"text": "test"}
+            assert len(results) == 1
+            assert results[0] == {"text": "test"}
 
     def test_predict_stream_sends_correct_headers(self):
         from unittest.mock import MagicMock, patch
@@ -1114,19 +1178,21 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [b"data: [DONE]"]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [b"data: [DONE]"]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                call_kwargs = mock_post.call_args[1]
-                assert call_kwargs["headers"]["Accept"] == "text/event-stream"
-                assert call_kwargs["stream"] is True
+            call_kwargs = mock_post.call_args[1]
+            assert call_kwargs["headers"]["Accept"] == "text/event-stream"
+            assert call_kwargs["stream"] is True
 
     def test_predict_stream_raises_on_missing_endpoint(self):
         from unittest.mock import patch
@@ -1141,6 +1207,6 @@ class TestPredictStreamMethod:
         with (
             patch.object(client, "get_deployment", return_value=mock_deployment),
             patch.object(client, "_get_modal_workspace", return_value=None),
+            pytest.raises(MlflowException, match="Could not find streaming endpoint"),
         ):
-            with pytest.raises(MlflowException, match="Could not find streaming endpoint"):
-                list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))

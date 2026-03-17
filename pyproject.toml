@@ -39,6 +39,9 @@ dev = [
     "ruff>=0.1.0",
     "twine>=4.0.0",
     "build>=1.0.0",
+    "mypy>=1.10.0",
+    "types-requests>=2.28.0",
+    "types-PyYAML>=6.0",
 ]
 
 [project.urls]
@@ -55,8 +58,38 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "B", "C4", "UP", "SIM", "PIE", "RUF"]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "modal.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mlflow.*"
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["mlflow_modal"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 55
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.codespell]
+skip = ".git,*.lock,dist,build,.venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
