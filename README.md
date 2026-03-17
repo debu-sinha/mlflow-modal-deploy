@@ -313,9 +313,10 @@ os.environ['PROXY_AUTH_TOKEN_SECRET'] = 'your_secret_here'
 predictions = client.predict(
     deployment_name="my-classifier",
     inputs={"feature1": [1, 2, 3], "feature2": [4, 5, 6]},
-    proxy_auth_enabled=True
 )
 ```
+
+When a deployment is created with `config={"proxy_auth": True}`, the `ModalDeploymentClient` automatically attaches the required `Modal-Key` and `Modal-Secret` headers in `predict()` and `predict_stream()` calls based on `PROXY_AUTH_TOKEN_ID` and `PROXY_AUTH_TOKEN_SECRET`. No extra parameters are needed on the prediction methods. The environment variables are mandatory.
 
 or
 
