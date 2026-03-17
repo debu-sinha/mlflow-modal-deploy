@@ -205,7 +205,7 @@ for whl in wheel_files:
         import pandas as pd
         df = pd.DataFrame(input_data)
         prediction = self.model.predict(df)
-         return {{"predictions": prediction.tolist() if hasattr(prediction, "tolist") else list(prediction)}}
+        return {{"predictions": prediction.tolist() if hasattr(prediction, "tolist") else list(prediction)}}
 """
 
     def _render_fastapi_endpoint_decorator(self) -> str:

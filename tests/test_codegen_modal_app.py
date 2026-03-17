@@ -72,7 +72,7 @@ class TestModalAppCodeGenerator:
 
         assert "@modal.batched" not in code
         assert "def predict(self, input_data: dict) -> dict" in code
-        assert 'return {"predictions": prediction.tolist()}' in code
+        assert 'return {"predictions": prediction.tolist()' in code
 
     def test_streaming_endpoint_always_present(self) -> None:
         config = _make_base_config(enable_batching=False)
