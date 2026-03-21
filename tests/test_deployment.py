@@ -864,7 +864,7 @@ class TestGeneratedCodeSyntax:
         }
         base_config.update(config_overrides)
 
-        code = _generate_modal_app_code("syntax-test", base_config)
+        code = _generate_modal_app_code_for_tests("syntax-test", base_config)
 
         # This will raise SyntaxError if the generated code has
         # indentation issues, unclosed brackets, or other syntax problems
