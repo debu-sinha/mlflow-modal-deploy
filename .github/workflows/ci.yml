@@ -5,12 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  pull_request_target:
+    branches: [main]
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Set up Python
@@ -31,6 +35,8 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Set up Python ${{ matrix.python-version }}
@@ -50,6 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: hynek/build-and-inspect-python-package@v2
 
   check:
