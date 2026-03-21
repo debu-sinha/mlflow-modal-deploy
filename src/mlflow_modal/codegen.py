@@ -22,7 +22,7 @@ class ModalAppCodeConfig:
     memory: int | str
     cpu: int | str
     timeout: int
-    modal_secret: str
+    modal_secret: str | None
     wheel_filenames: list[str] | None
     enable_batching: bool
     max_batch_size: int
@@ -215,7 +215,7 @@ for whl in wheel_files:
             return '@modal.fastapi_endpoint(method="POST", requires_proxy_auth=True)'
         return '@modal.fastapi_endpoint(method="POST")'
 
-    def _render_secret_decorator(self) -> str:
+    def _render_secret_decorator(self) -> tuple[str, str]:
         """Build secret reference if specified (escape for safe code generation)"""
         c = self._config
         secret_str = ""
