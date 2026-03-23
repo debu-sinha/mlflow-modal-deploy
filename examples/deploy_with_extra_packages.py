@@ -29,9 +29,7 @@ from sklearn.model_selection import train_test_split
 def train_and_log_model():
     """Train a model and log it to MLflow."""
     iris = load_iris()
-    X_train, X_test, y_train, y_test = train_test_split(
-        iris.data, iris.target, test_size=0.2, random_state=42
-    )
+    X_train, X_test, y_train, y_test = train_test_split(iris.data, iris.target, test_size=0.2, random_state=42)
 
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
@@ -85,7 +83,7 @@ def deploy_transformers_model_example():
     Transformers models often need additional packages for efficient inference
     that weren't captured during training.
     """
-    client = get_deploy_client("modal")
+    get_deploy_client("modal")  # Verify plugin is installed
 
     # Note: This is a hypothetical deployment showing the pattern
     # In real usage, you'd have an actual transformers model URI
