@@ -5,7 +5,8 @@
 [![PyPI version](https://img.shields.io/pypi/v/mlflow-modal-deploy)](https://pypi.org/project/mlflow-modal-deploy/)
 [![Downloads](https://static.pepy.tech/badge/mlflow-modal-deploy)](https://pepy.tech/project/mlflow-modal-deploy)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10-3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
+[![codecov](https://codecov.io/gh/debu-sinha/mlflow-modal-deploy/branch/main/graph/badge.svg)](https://codecov.io/gh/debu-sinha/mlflow-modal-deploy)
 
 Deploy MLflow models to [Modal](https://modal.com)'s serverless GPU infrastructure with a single command.
 
@@ -20,7 +21,7 @@ pip install mlflow-modal-deploy
 ## Features
 
 - **One-command deployment**: Deploy any MLflow model to Modal's serverless infrastructure
-- **GPU support**: T4, L4, L40S, A10, A100, A100-40GB, A100-80GB, H100, H200, B200
+- **GPU support**: T4, L4, L40S, A10, A10G, A100, A100-40GB, A100-80GB, H100, H200, B200, RTX-PRO-6000
 - **Streaming predictions**: `predict_stream()` API compatible with MLflow Databricks client
 - **Auto-scaling**: Configure min/max containers, scale-down windows
 - **Dynamic batching**: Built-in request batching for high-throughput workloads
@@ -31,12 +32,8 @@ pip install mlflow-modal-deploy
 
 ## How it Works
 
-```mermaid
-flowchart LR
-    A[MLflow Model] --> B[Extract Dependencies]
-    B --> C[Modal Volume]
-    C --> D[Generate Modal App]
-    D --> E[HTTPS Endpoint]
+```
+MLflow Model -> Extract Dependencies -> Modal Volume -> Generate Modal App -> HTTPS Endpoint
 ```
 
 1. **Extract**: MLflow model artifacts and dependencies are extracted from the model URI
@@ -101,7 +98,7 @@ mlflow deployments delete -t modal --name my-model
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `gpu` | str/list | None | GPU type (T4, L4, L40S, A10, A100, A100-40GB, A100-80GB, H100, H200, B200), multi-GPU (`H100:8`), dedicated (`H100!`), or fallback list (`["H100", "A100"]`) |
+| `gpu` | str/list | None | GPU type (T4, L4, L40S, A10, A10G, A100, A100-40GB, A100-80GB, H100, H200, B200, RTX-PRO-6000), multi-GPU (`H100:8`), dedicated (`H100!`), upgrade fallback (`B200+`), or fallback list (`["H100", "A100"]`) |
 | `memory` | int | 512 | Memory allocation in MB |
 | `cpu` | float | 1.0 | CPU cores |
 | `timeout` | int | 300 | Request timeout in seconds |
@@ -120,6 +117,7 @@ mlflow deployments delete -t modal --name my-model
 | `pip_index_url` | str | None | Custom PyPI index URL for private packages |
 | `pip_extra_index_url` | str | None | Additional PyPI index URL (fallback) |
 | `modal_secret` | str | None | Modal secret name containing pip credentials |
+| `proxy_auth` | bool | False | Enable proxy auth protection for modal endpoint |
 
 ## Authentication
 
@@ -286,6 +284,48 @@ model/
 ├── code/
 │   └── my_private_package-1.0.0-py3-none-any.whl  # Auto-detected
 └── ...
+```
+
+### Deploying with Proxy Authentication Enabled
+Enables [proxy authentication](https://modal.com/docs/guide/webhook-proxy-auth#proxy-auth-tokens) in modal's ENDPOINT URL.
+
+Apps deployed without proxy authentication enabled are public to anyone with knowledge of the endpoint to make api requests, it can be hit by any client over the Internet. With proxy authentication enabled, Modal's authentication feature only allows users with access to make requests.
+
+```python
+# Deploy model
+client.create_deployment(
+    name="my-classifier",
+    model_uri="runs:/abc123/model",
+    config={
+        "proxy_auth": True,
+    }
+)
+```
+
+```python
+import os
+
+# Set an environment variable (if are not set)
+os.environ['PROXY_AUTH_TOKEN_ID'] = 'your_api_key_here'
+os.environ['PROXY_AUTH_TOKEN_SECRET'] = 'your_secret_here'
+
+# Make predictions
+predictions = client.predict(
+    deployment_name="my-classifier",
+    inputs={"feature1": [1, 2, 3], "feature2": [4, 5, 6]},
+)
+```
+
+When a deployment is created with `config={"proxy_auth": True}`, the `ModalDeploymentClient` automatically attaches the required `Modal-Key` and `Modal-Secret` headers in `predict()` and `predict_stream()` calls based on `PROXY_AUTH_TOKEN_ID` and `PROXY_AUTH_TOKEN_SECRET`. No extra parameters are needed on the prediction methods. The environment variables are mandatory.
+
+or
+
+```sh
+export PROXY_AUTH_TOKEN_ID=your_api_key_here
+export PROXY_AUTH_TOKEN_SECRET=your_secret_here
+curl -H "Modal-Key: $PROXY_AUTH_TOKEN_ID" \
+     -H "Modal-Secret: $PROXY_AUTH_TOKEN_SECRET" \
+     https://private-url--goes-here.modal.run
 ```
 
 ## Troubleshooting

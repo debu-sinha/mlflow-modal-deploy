@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-03-09
+
+### Fixed
+- Fixed GPU validation to handle Modal's `+` upgrade suffix (e.g., `B200+` for fallback to B300)
+- Fixed potential `AttributeError` when `result.stderr` is `None` in `delete_deployment()`
+- Fixed `.tolist()` calls in generated code to handle predictions that return plain lists instead of numpy arrays
+
+### Added
+- Added `RTX-PRO-6000` to supported GPU types
+- Added Python 3.13 classifier
+
+### Changed
+- Updated `SECURITY.md` supported versions from 0.2.x to 0.6.x
+
 ## [0.6.1] - 2026-02-20
 
 ### Fixed
@@ -155,7 +169,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full MLflow CLI integration (`mlflow deployments` commands)
 - Workspace targeting via URI (`modal:/workspace-name`)
 
-[Unreleased]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/debu-sinha/mlflow-modal-deploy/compare/v0.4.0...v0.5.0

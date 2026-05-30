@@ -1,5 +1,6 @@
 """Integration tests for Modal deployment - requires Modal authentication."""
 
+import contextlib
 import os
 
 import pytest
@@ -72,7 +73,5 @@ class TestModalIntegration:
 
         finally:
             # Cleanup: delete deployment
-            try:
+            with contextlib.suppress(Exception):
                 client.delete_deployment(deployment_name)
-            except Exception:
-                pass  # Best effort cleanup

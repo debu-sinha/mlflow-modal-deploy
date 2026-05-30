@@ -12,10 +12,10 @@ from mlflow_modal.deployment import (
     target_help,
 )
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __all__ = [
+    "SUPPORTED_GPUS",
     "ModalDeploymentClient",
     "run_local",
     "target_help",
-    "SUPPORTED_GPUS",
 ]

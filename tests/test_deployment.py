@@ -1,7 +1,9 @@
 """Tests for MLflow Modal deployment client."""
 
+import ast
 import sys
 import types
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -10,11 +12,11 @@ import pytest
 from mlflow.exceptions import MlflowException
 
 import mlflow_modal
+from mlflow_modal.codegen import ModalAppCodeConfig, _escape_string_for_codegen, generate_modal_app_code
 from mlflow_modal.deployment import (
     SUPPORTED_GPUS,
     ModalDeploymentClient,
-    _escape_string_for_codegen,
-    _generate_modal_app_code,
+    _build_modal_app_codegen_config,
     _get_model_python_version,
     _get_model_requirements,
     _get_preferred_deployment_flavor,
@@ -22,6 +24,27 @@ from mlflow_modal.deployment import (
     _validate_deployment_flavor,
     target_help,
 )
+
+
+def check_syntax(code: str) -> None:
+    """Assert that the given code string is syntactically valid Python."""
+    ast.parse(code)
+
+
+def _generate_modal_app_code_for_tests(
+    app_name: str,
+    config: dict,
+    model_requirements: list[str] | None = None,
+    wheel_filenames: list[str] | None = None,
+) -> str:
+    """Helper to generate Modal app code using the current codegen API."""
+    codegen_config = _build_modal_app_codegen_config(
+        app_name=app_name,
+        config=config,
+        model_requirements=model_requirements,
+        wheel_filenames=wheel_filenames,
+    )
+    return generate_modal_app_code(codegen_config)
 
 
 class TestModuleExports:
@@ -39,7 +62,8 @@ class TestModuleExports:
 
 class TestSupportedGPUs:
     @pytest.mark.parametrize(
-        "gpu", ["T4", "L4", "L40S", "A10", "A100", "A100-40GB", "A100-80GB", "H100", "H200", "B200"]
+        "gpu",
+        ["T4", "L4", "L40S", "A10", "A100", "A100-40GB", "A100-80GB", "H100", "H200", "B200", "RTX-PRO-6000"],
     )
     def test_gpu_in_supported_list(self, gpu):
         assert gpu in SUPPORTED_GPUS
@@ -154,6 +178,27 @@ class TestConfigValidation:
         result = client._apply_custom_config(base_config, {"gpu": "H100!"})
         assert result["gpu"] == "H100!"
 
+    def test_upgrade_gpu_suffix_accepted(self):
+        client = ModalDeploymentClient("modal")
+        base_config = client._default_deployment_config()
+
+        result = client._apply_custom_config(base_config, {"gpu": "B200+"})
+        assert result["gpu"] == "B200+"
+
+    def test_upgrade_gpu_suffix_with_count_accepted(self):
+        client = ModalDeploymentClient("modal")
+        base_config = client._default_deployment_config()
+
+        result = client._apply_custom_config(base_config, {"gpu": "B200+:4"})
+        assert result["gpu"] == "B200+:4"
+
+    def test_rtx_pro_6000_accepted(self):
+        client = ModalDeploymentClient("modal")
+        base_config = client._default_deployment_config()
+
+        result = client._apply_custom_config(base_config, {"gpu": "RTX-PRO-6000"})
+        assert result["gpu"] == "RTX-PRO-6000"
+
 
 class TestModelRequirements:
     def test_empty_model_path_returns_empty_tuple(self, tmp_path):
@@ -200,7 +245,7 @@ dependencies:
         (code_dir / "my_package-1.0.0-py3-none-any.whl").write_text("fake wheel")
         (code_dir / "other_pkg-2.0.0-py3-none-any.whl").write_text("fake wheel")
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        _requirements, wheel_files = _get_model_requirements(str(tmp_path))
 
         assert len(wheel_files) == 2
         assert any("my_package" in w for w in wheel_files)
@@ -243,7 +288,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("test-app", config)
+        code = _generate_modal_app_code_for_tests("test-app", config)
 
         assert 'app = modal.App("test-app")' in code
         assert "gpu=None" in code
@@ -266,7 +311,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("gpu-app", config)
+        code = _generate_modal_app_code_for_tests("gpu-app", config)
 
         assert 'gpu="T4"' in code
         assert "memory=2048" in code
@@ -288,7 +333,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("batch-app", config)
+        code = _generate_modal_app_code_for_tests("batch-app", config)
 
         assert "@modal.batched" in code
         assert "max_batch_size=16" in code
@@ -310,7 +355,7 @@ class TestAppCodeGeneration:
         }
         requirements = ["numpy==1.24.0", "pandas>=2.0"]
 
-        code = _generate_modal_app_code("req-app", config, requirements)
+        code = _generate_modal_app_code_for_tests("req-app", config, requirements)
 
         assert '"mlflow"' in code
         assert '"numpy==1.24.0"' in code
@@ -330,7 +375,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("scale-app", config)
+        code = _generate_modal_app_code_for_tests("scale-app", config)
 
         assert "min_containers=2" in code
         assert "max_containers=10" in code
@@ -350,7 +395,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 5,
         }
 
-        code = _generate_modal_app_code("concurrent-app", config)
+        code = _generate_modal_app_code_for_tests("concurrent-app", config)
 
         assert "@modal.concurrent(max_inputs=5)" in code
 
@@ -368,7 +413,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("no-concurrent-app", config)
+        code = _generate_modal_app_code_for_tests("no-concurrent-app", config)
 
         assert "@modal.concurrent" not in code
 
@@ -387,7 +432,7 @@ class TestAppCodeGeneration:
         }
         wheel_filenames = ["my_package-1.0.0-py3-none-any.whl", "other-2.0.0-py3-none-any.whl"]
 
-        code = _generate_modal_app_code("wheel-app", config, None, wheel_filenames)
+        code = _generate_modal_app_code_for_tests("wheel-app", config, None, wheel_filenames)
 
         assert "Install wheel dependencies from volume" in code
         assert "/model/wheels/my_package-1.0.0-py3-none-any.whl" in code
@@ -407,7 +452,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("fallback-gpu-app", config)
+        code = _generate_modal_app_code_for_tests("fallback-gpu-app", config)
 
         assert 'gpu=["H100", "A100-80GB"]' in code
 
@@ -426,7 +471,7 @@ class TestAppCodeGeneration:
             "target_inputs": 3,
         }
 
-        code = _generate_modal_app_code("target-inputs-app", config)
+        code = _generate_modal_app_code_for_tests("target-inputs-app", config)
 
         assert "@modal.concurrent(target_inputs=3)" in code
 
@@ -445,7 +490,7 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("buffer-app", config)
+        code = _generate_modal_app_code_for_tests("buffer-app", config)
 
         assert "buffer_containers=3" in code
 
@@ -464,9 +509,55 @@ class TestAppCodeGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("startup-timeout-app", config)
+        code = _generate_modal_app_code_for_tests("startup-timeout-app", config)
 
         assert "startup_timeout=600" in code
+
+    def test_generated_code_is_valid_python_non_batching(self):
+        config = {
+            "gpu": None,
+            "memory": 512,
+            "cpu": 1.0,
+            "timeout": 300,
+            "scaledown_window": 60,
+            "enable_batching": False,
+            "python_version": "3.10",
+            "min_containers": 0,
+            "max_containers": None,
+            "concurrent_inputs": 1,
+        }
+
+        code = _generate_modal_app_code_for_tests("syntax-non-batch-app", config)
+
+        assert "def predict(" in code
+        assert 'return {"predictions"' in code or "return {'predictions'" in code
+
+        # Ensure generated code is syntactically valid Python
+        check_syntax(code)
+
+    def test_generated_code_is_valid_python_with_batching(self):
+        config = {
+            "gpu": None,
+            "memory": 512,
+            "cpu": 1.0,
+            "timeout": 300,
+            "scaledown_window": 60,
+            "enable_batching": True,
+            "max_batch_size": 8,
+            "batch_wait_ms": 100,
+            "python_version": "3.10",
+            "min_containers": 0,
+            "max_containers": None,
+            "concurrent_inputs": 1,
+        }
+
+        code = _generate_modal_app_code_for_tests("syntax-batch-app", config)
+
+        assert "def predict_batch" in code
+        assert "def predict(" in code
+
+        # Ensure generated code is syntactically valid Python
+        check_syntax(code)
 
 
 class TestClientInstance:
@@ -548,7 +639,7 @@ dependencies:
 """
         )
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        requirements, _wheel_files = _get_model_requirements(str(tmp_path))
 
         assert "numpy=1.24.0" in requirements
         assert "scipy" in requirements
@@ -566,7 +657,7 @@ dependencies:
 """
         )
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        requirements, _wheel_files = _get_model_requirements(str(tmp_path))
 
         assert "numpy==1.24.0" in requirements
         assert not any(".whl" in r for r in requirements)
@@ -575,7 +666,7 @@ dependencies:
         req_file = tmp_path / "requirements.txt"
         req_file.write_text("numpy==1.24.0\ncode/custom-1.0.0.whl\npandas")
 
-        requirements, wheel_files = _get_model_requirements(str(tmp_path))
+        requirements, _wheel_files = _get_model_requirements(str(tmp_path))
 
         assert "numpy==1.24.0" in requirements
         assert "pandas" in requirements
@@ -644,7 +735,7 @@ class TestAppCodeGenerationEdgeCases:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("default-app", config)
+        code = _generate_modal_app_code_for_tests("default-app", config)
 
         assert "min_containers=0" not in code
         assert "max_containers=" not in code or "max_containers=None" not in code
@@ -663,7 +754,7 @@ class TestAppCodeGenerationEdgeCases:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("no-req-app", config, [])
+        code = _generate_modal_app_code_for_tests("no-req-app", config, [])
 
         assert ".uv_pip_install" in code
         assert '"mlflow"' in code
@@ -682,7 +773,7 @@ class TestAppCodeGenerationEdgeCases:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("no-wheel-app", config, None, None)
+        code = _generate_modal_app_code_for_tests("no-wheel-app", config, None, None)
 
         assert "Install wheel dependencies" not in code
 
@@ -701,7 +792,7 @@ class TestAppCodeGenerationEdgeCases:
             "extra_pip_packages": ["transformers>=4.30", "torch==2.0.0"],
         }
 
-        code = _generate_modal_app_code("extra-deps-app", config)
+        code = _generate_modal_app_code_for_tests("extra-deps-app", config)
 
         assert '"transformers>=4.30"' in code
         assert '"torch==2.0.0"' in code
@@ -723,12 +814,68 @@ class TestAppCodeGenerationEdgeCases:
         }
         model_requirements = ["numpy==1.24.0", "pandas>=2.0"]
 
-        code = _generate_modal_app_code("combined-deps-app", config, model_requirements)
+        code = _generate_modal_app_code_for_tests("combined-deps-app", config, model_requirements)
 
         assert '"mlflow"' in code
         assert '"numpy==1.24.0"' in code
         assert '"pandas>=2.0"' in code
         assert '"transformers>=4.30"' in code
+
+
+class TestGeneratedCodeSyntax:
+    """Validate that all generated code is syntactically valid Python.
+
+    This catches indentation errors, unclosed brackets, and other issues
+    that string-presence assertions miss.
+    """
+
+    @pytest.mark.parametrize(
+        "config_overrides",
+        [
+            {},
+            {"enable_batching": True, "max_batch_size": 16},
+            {"gpu": "T4"},
+            {"gpu": ["H100", "A100-80GB"]},
+            {"modal_secret": "pip-credentials"},
+            {"concurrent_inputs": 5},
+            {"wheel_filenames": ["pkg.whl"]},
+            {"pip_index_url": "https://pypi.example.com/simple/"},
+            {"min_containers": 2, "max_containers": 10, "scaledown_window": 120},
+        ],
+        ids=[
+            "defaults",
+            "batching",
+            "single_gpu",
+            "multi_gpu",
+            "secret",
+            "concurrent",
+            "wheels",
+            "pip_index",
+            "scaling",
+        ],
+    )
+    def test_generated_code_is_valid_python(self, config_overrides):
+        import ast
+
+        base_config = {
+            "gpu": None,
+            "memory": 512,
+            "cpu": 1.0,
+            "timeout": 300,
+            "scaledown_window": 60,
+            "enable_batching": False,
+            "python_version": "3.10",
+            "min_containers": 0,
+            "max_containers": None,
+            "concurrent_inputs": 1,
+        }
+        base_config.update(config_overrides)
+
+        code = _generate_modal_app_code_for_tests("syntax-test", base_config)
+
+        # This will raise SyntaxError if the generated code has
+        # indentation issues, unclosed brackets, or other syntax problems
+        ast.parse(code)
 
 
 class TestExtraPipPackagesConfig:
@@ -776,7 +923,7 @@ class TestPrivateRepoConfig:
             "pip_index_url": "https://pypi.my-company.com/simple/",
         }
 
-        code = _generate_modal_app_code("private-repo-app", config)
+        code = _generate_modal_app_code_for_tests("private-repo-app", config)
 
         assert 'index_url="https://pypi.my-company.com/simple/"' in code
 
@@ -795,7 +942,7 @@ class TestPrivateRepoConfig:
             "pip_extra_index_url": "https://private.pypi.org/simple/",
         }
 
-        code = _generate_modal_app_code("extra-index-app", config)
+        code = _generate_modal_app_code_for_tests("extra-index-app", config)
 
         assert 'extra_index_url="https://private.pypi.org/simple/"' in code
 
@@ -814,7 +961,7 @@ class TestPrivateRepoConfig:
             "modal_secret": "pip-credentials",
         }
 
-        code = _generate_modal_app_code("secret-app", config)
+        code = _generate_modal_app_code_for_tests("secret-app", config)
 
         assert 'modal.Secret.from_name("pip-credentials")' in code
         assert "secrets=[pip_secret]" in code
@@ -837,12 +984,73 @@ class TestPrivateRepoConfig:
             "extra_pip_packages": ["my-private-package>=1.0"],
         }
 
-        code = _generate_modal_app_code("full-private-app", config)
+        code = _generate_modal_app_code_for_tests("full-private-app", config)
 
         assert 'index_url="https://pypi.my-company.com/simple/"' in code
         assert 'extra_index_url="https://pypi.python.org/simple/"' in code
         assert 'modal.Secret.from_name("pypi-auth")' in code
         assert '"my-private-package>=1.0"' in code
+
+
+class TestCodegenConfigMapping:
+    def test_build_modal_app_codegen_config_maps_fields(self):
+        config = {
+            "gpu": "T4",
+            "memory": 2048,
+            "cpu": 2.0,
+            "timeout": 600,
+            "startup_timeout": 900,
+            "scaledown_window": 120,
+            "enable_batching": True,
+            "max_batch_size": 16,
+            "batch_wait_ms": 200,
+            "python_version": "3.11",
+            "concurrent_inputs": 4,
+            "target_inputs": 8,
+            "min_containers": 1,
+            "max_containers": 5,
+            "buffer_containers": 2,
+            "extra_pip_packages": ["transformers>=4.30"],
+            "pip_index_url": "https://pypi.example.com/simple/",
+            "pip_extra_index_url": "https://pypi.org/simple/",
+            "modal_secret": "pypi-auth",
+            "proxy_auth": True,
+        }
+
+        model_requirements = ["numpy==1.24.0"]
+        wheel_filenames = ["pkg-1.0.0-py3-none-any.whl"]
+
+        codegen_config = _build_modal_app_codegen_config(
+            app_name="mapping-app",
+            config=config,
+            model_requirements=model_requirements,
+            wheel_filenames=wheel_filenames,
+        )
+
+        assert isinstance(codegen_config, ModalAppCodeConfig)
+        assert codegen_config.app_name == "mapping-app"
+        assert codegen_config.gpu_config == "T4"
+        assert codegen_config.memory == 2048
+        assert codegen_config.cpu == 2.0
+        assert codegen_config.timeout == 600
+        assert codegen_config.startup_timeout == 900
+        assert codegen_config.scaledown_window == 120
+        assert codegen_config.enable_batching is True
+        assert codegen_config.max_batch_size == 16
+        assert codegen_config.batch_wait_ms == 200
+        assert codegen_config.python_version == "3.11"
+        assert codegen_config.concurrent_inputs == 4
+        assert codegen_config.target_inputs == 8
+        assert codegen_config.min_containers == 1
+        assert codegen_config.max_containers == 5
+        assert codegen_config.buffer_containers == 2
+        assert codegen_config.extra_pip_packages == ["transformers>=4.30"]
+        assert codegen_config.pip_index_url == "https://pypi.example.com/simple/"
+        assert codegen_config.pip_extra_index_url == "https://pypi.org/simple/"
+        assert codegen_config.modal_secret == "pypi-auth"
+        assert codegen_config.proxy_auth is True
+        assert codegen_config.model_requirements == model_requirements
+        assert codegen_config.wheel_filenames == wheel_filenames
 
 
 class TestSecurityValidation:
@@ -921,7 +1129,7 @@ class TestStreamingEndpointGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("stream-app", config)
+        code = _generate_modal_app_code_for_tests("stream-app", config)
 
         assert "def predict_stream" in code
         assert "StreamingResponse" in code
@@ -944,7 +1152,7 @@ class TestStreamingEndpointGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("batch-stream-app", config)
+        code = _generate_modal_app_code_for_tests("batch-stream-app", config)
 
         # Both regular and streaming endpoints should be present
         assert "def predict" in code
@@ -965,7 +1173,7 @@ class TestStreamingEndpointGeneration:
             "concurrent_inputs": 1,
         }
 
-        code = _generate_modal_app_code("stream-check-app", config)
+        code = _generate_modal_app_code_for_tests("stream-check-app", config)
 
         # Should check for model's predict_stream capability
         assert "hasattr(self.model, 'predict_stream')" in code
@@ -998,22 +1206,24 @@ class TestPredictStreamMethod:
         # Mock get_deployment to return a URL
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                # Mock streaming response
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [b"data: [DONE]"]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            # Mock streaming response
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [b"data: [DONE]"]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                # Consume the generator
-                list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            # Consume the generator
+            list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                # Verify URL was constructed correctly
-                mock_post.assert_called_once()
-                call_args = mock_post.call_args
-                assert call_args[0][0] == "https://test--app.modal.run/predict_stream"
+            # Verify URL was constructed correctly
+            mock_post.assert_called_once()
+            call_args = mock_post.call_args
+            assert call_args[0][0] == "https://test--app.modal.run/predict_stream"
 
     def test_predict_stream_parses_sse_format(self):
         from unittest.mock import MagicMock, patch
@@ -1022,25 +1232,27 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                # Mock streaming response with SSE data
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [
-                    b'data: {"chunk": 1, "text": "Hello"}',
-                    b'data: {"chunk": 2, "text": " World"}',
-                    b"data: [DONE]",
-                ]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            # Mock streaming response with SSE data
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [
+                b'data: {"chunk": 1, "text": "Hello"}',
+                b'data: {"chunk": 2, "text": " World"}',
+                b"data: [DONE]",
+            ]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                # Collect results
-                results = list(client.predict_stream(deployment_name="test", inputs={"prompt": "Hi"}))
+            # Collect results
+            results = list(client.predict_stream(deployment_name="test", inputs={"prompt": "Hi"}))
 
-                assert len(results) == 2
-                assert results[0] == {"chunk": 1, "text": "Hello"}
-                assert results[1] == {"chunk": 2, "text": " World"}
+            assert len(results) == 2
+            assert results[0] == {"chunk": 1, "text": "Hello"}
+            assert results[1] == {"chunk": 2, "text": " World"}
 
     def test_predict_stream_skips_empty_lines(self):
         from unittest.mock import MagicMock, patch
@@ -1049,23 +1261,25 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [
-                    b"",  # Empty line
-                    b'data: {"text": "test"}',
-                    b"",  # Another empty line
-                    b"data: [DONE]",
-                ]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [
+                b"",  # Empty line
+                b'data: {"text": "test"}',
+                b"",  # Another empty line
+                b"data: [DONE]",
+            ]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                assert len(results) == 1
-                assert results[0] == {"text": "test"}
+            assert len(results) == 1
+            assert results[0] == {"text": "test"}
 
     def test_predict_stream_skips_non_data_lines(self):
         from unittest.mock import MagicMock, patch
@@ -1074,23 +1288,25 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [
-                    b"event: message",  # Non-data line
-                    b'data: {"text": "test"}',
-                    b"id: 123",  # Another non-data line
-                    b"data: [DONE]",
-                ]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [
+                b"event: message",  # Non-data line
+                b'data: {"text": "test"}',
+                b"id: 123",  # Another non-data line
+                b"data: [DONE]",
+            ]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            results = list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                assert len(results) == 1
-                assert results[0] == {"text": "test"}
+            assert len(results) == 1
+            assert results[0] == {"text": "test"}
 
     def test_predict_stream_sends_correct_headers(self):
         from unittest.mock import MagicMock, patch
@@ -1099,19 +1315,21 @@ class TestPredictStreamMethod:
 
         mock_deployment = {"endpoint_url": "https://test--app.modal.run/predict"}
 
-        with patch.object(client, "get_deployment", return_value=mock_deployment):
-            with patch("requests.post") as mock_post:
-                mock_response = MagicMock()
-                mock_response.iter_lines.return_value = [b"data: [DONE]"]
-                mock_response.__enter__ = MagicMock(return_value=mock_response)
-                mock_response.__exit__ = MagicMock(return_value=False)
-                mock_post.return_value = mock_response
+        with (
+            patch.object(client, "get_deployment", return_value=mock_deployment),
+            patch("requests.post") as mock_post,
+        ):
+            mock_response = MagicMock()
+            mock_response.iter_lines.return_value = [b"data: [DONE]"]
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_post.return_value = mock_response
 
-                list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
-                call_kwargs = mock_post.call_args[1]
-                assert call_kwargs["headers"]["Accept"] == "text/event-stream"
-                assert call_kwargs["stream"] is True
+            call_kwargs = mock_post.call_args[1]
+            assert call_kwargs["headers"]["Accept"] == "text/event-stream"
+            assert call_kwargs["stream"] is True
 
     def test_predict_stream_raises_on_missing_endpoint(self):
         from unittest.mock import patch
@@ -1126,21 +1344,21 @@ class TestPredictStreamMethod:
         with (
             patch.object(client, "get_deployment", return_value=mock_deployment),
             patch.object(client, "_get_modal_workspace", return_value=None),
+            pytest.raises(MlflowException, match="Could not find streaming endpoint"),
         ):
-            with pytest.raises(MlflowException, match="Could not find streaming endpoint"):
-                list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+            list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
 
 
 class TestSchemaCoercion:
     """Tests that the generated predict endpoints correctly coerce DataFrame dtypes.
 
-    All tests exec the code produced by _generate_modal_app_code() under a
+    All tests exec the code produced by _generate_modal_app_code_for_tests() under a
     minimal Modal mock, then call the generated methods directly.  If the
-    coercion block is removed from deployment.py the strict mock model will
+    coercion block is removed from codegen.py the strict mock model will
     raise and the tests will fail.
     """
 
-    _base_config = {
+    _base_config: ClassVar[dict] = {
         "gpu": None,
         "memory": 512,
         "cpu": 1.0,
@@ -1180,10 +1398,10 @@ class TestSchemaCoercion:
     def _exec_class(self, config, mock_model):
         """Generate code for *config*, exec it under the Modal mock, and return
         an MLflowModel instance with *mock_model* already injected."""
-        code = _generate_modal_app_code("test-app", config)
+        code = _generate_modal_app_code_for_tests("test-app", config)
         namespace = {}
         with patch.dict(sys.modules, {"modal": self._build_modal_mock()}):
-            exec(code, namespace)  # noqa: S102
+            exec(code, namespace)
         instance = namespace["MLflowModel"].__new__(namespace["MLflowModel"])
         instance.model = mock_model
         return instance
