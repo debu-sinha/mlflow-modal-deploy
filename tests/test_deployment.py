@@ -1574,3 +1574,51 @@ class TestSchemaCoercion:
             assert pd.api.types.is_datetime64_any_dtype(coerced), f"Expected datetime64 dtype, got {coerced.dtype}"
         else:
             assert coerced.dtype == np.dtype(pandas_dtype), f"Expected {pandas_dtype}, got {coerced.dtype}"
+
+    def test_double_coercion_streaming_fallback(self):
+        """Streaming fallback path coerces int64 to float64 before predict.
+
+        predict_stream falls back to the regular predict path when the model
+        has no native predict_stream attribute.  The schema coercion block must
+        run there too — without it a double-schema model rejects whole-number
+        JSON values.
+        """
+        import json
+
+        config = {**self._base_config, "enable_batching": False}
+
+        # Build a strict model with no predict_stream attribute so the fallback
+        # branch is taken.  MagicMock(spec=...) makes hasattr() return False for
+        # any name not in the spec list.
+        col_spec = MagicMock()
+        col_spec.name = "value"
+        col_spec.type.to_pandas.return_value = "float64"
+        schema_mock = MagicMock()
+        schema_mock.inputs = [col_spec]
+
+        def strict_predict(df):
+            if df["value"].dtype == np.int64:
+                raise MlflowException("Expected float64, got int64")
+            return df["value"].values
+
+        model = MagicMock(spec=["metadata", "predict"])
+        model.metadata.get_input_schema.return_value = schema_mock
+        model.predict.side_effect = strict_predict
+
+        instance = self._exec_class(config, model)
+
+        # Capture the SSE chunks that the generator yields, bypassing the async
+        # StreamingResponse wrapper.
+        captured_chunks = []
+
+        def capture_streaming_response(generator, **kwargs):
+            captured_chunks.extend(generator)
+            return MagicMock()
+
+        with patch("fastapi.responses.StreamingResponse", side_effect=capture_streaming_response):
+            instance.predict_stream({"value": [-100, -500]})
+
+        data_lines = [c for c in captured_chunks if "predictions" in c]
+        assert len(data_lines) == 1
+        json_str = data_lines[0].split("data:", 1)[1].strip()
+        assert json.loads(json_str) == {"predictions": [-100.0, -500.0]}
