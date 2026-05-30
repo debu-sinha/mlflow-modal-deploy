@@ -364,6 +364,11 @@ image = (
         results = []
         for input_data in inputs:
             df = pd.DataFrame(input_data)
+            schema = self.model.metadata.get_input_schema()
+            if schema is not None:
+                for col_spec in schema.inputs:
+                    if col_spec.name in df.columns:
+                        df[col_spec.name] = df[col_spec.name].astype(col_spec.type.to_pandas())
             prediction = self.model.predict(df)
             results.append({{"predictions": prediction.tolist()}})
         return results
@@ -378,6 +383,11 @@ image = (
     def predict(self, input_data: dict) -> dict:
         import pandas as pd
         df = pd.DataFrame(input_data)
+        schema = self.model.metadata.get_input_schema()
+        if schema is not None:
+            for col_spec in schema.inputs:
+                if col_spec.name in df.columns:
+                    df[col_spec.name] = df[col_spec.name].astype(col_spec.type.to_pandas())
         prediction = self.model.predict(df)
         return {"predictions": prediction.tolist()}
 """
@@ -404,6 +414,11 @@ image = (
             # Fall back to regular prediction for non-streaming models
             import pandas as pd
             df = pd.DataFrame(input_data)
+            schema = self.model.metadata.get_input_schema()
+            if schema is not None:
+                for col_spec in schema.inputs:
+                    if col_spec.name in df.columns:
+                        df[col_spec.name] = df[col_spec.name].astype(col_spec.type.to_pandas())
             prediction = self.model.predict(df)
             yield f"data: {json.dumps({'predictions': prediction.tolist()})}\\n\\n"
             yield "data: [DONE]\\n\\n"

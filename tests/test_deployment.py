@@ -1,6 +1,13 @@
 """Tests for MLflow Modal deployment client."""
 
+import sys
+import types
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pandas as pd
 import pytest
+from mlflow.exceptions import MlflowException
 
 import mlflow_modal
 from mlflow_modal.deployment import (
@@ -1122,3 +1129,230 @@ class TestPredictStreamMethod:
         ):
             with pytest.raises(MlflowException, match="Could not find streaming endpoint"):
                 list(client.predict_stream(deployment_name="test", inputs={"test": "data"}))
+
+
+class TestSchemaCoercion:
+    """Tests that the generated predict endpoints correctly coerce DataFrame dtypes.
+
+    All tests exec the code produced by _generate_modal_app_code() under a
+    minimal Modal mock, then call the generated methods directly.  If the
+    coercion block is removed from deployment.py the strict mock model will
+    raise and the tests will fail.
+    """
+
+    _base_config = {
+        "gpu": None,
+        "memory": 512,
+        "cpu": 1.0,
+        "timeout": 300,
+        "scaledown_window": 60,
+        "python_version": "3.10",
+        "min_containers": 0,
+        "max_containers": None,
+        "concurrent_inputs": 1,
+    }
+
+    @staticmethod
+    def _build_modal_mock():
+        """Minimal Modal module stub so that exec-ing generated code doesn't
+        require a real Modal installation or network calls."""
+        modal_mock = types.ModuleType("modal")
+
+        _noop = lambda *a, **kw: (lambda fn: fn)  # noqa: E731
+        modal_mock.enter = _noop
+        modal_mock.fastapi_endpoint = _noop
+        modal_mock.batched = _noop
+        modal_mock.concurrent = _noop
+
+        class _App:
+            def cls(self, **kw):
+                return lambda cls: cls
+
+        modal_mock.App = lambda name: _App()
+        modal_mock.Volume = MagicMock()
+        _img = MagicMock()
+        _img.debian_slim.return_value = _img
+        modal_mock.Image = _img
+        modal_mock.Secret = MagicMock()
+
+        return modal_mock
+
+    def _exec_class(self, config, mock_model):
+        """Generate code for *config*, exec it under the Modal mock, and return
+        an MLflowModel instance with *mock_model* already injected."""
+        code = _generate_modal_app_code("test-app", config)
+        namespace = {}
+        with patch.dict(sys.modules, {"modal": self._build_modal_mock()}):
+            exec(code, namespace)  # noqa: S102
+        instance = namespace["MLflowModel"].__new__(namespace["MLflowModel"])
+        instance.model = mock_model
+        return instance
+
+    @staticmethod
+    def _make_strict_model(col_name="value"):
+        """MLflow model mock that raises MlflowException when *col_name* dtype
+        is int64, simulating MLflow schema enforcement for a double column."""
+
+        def strict_predict(df):
+            if df[col_name].dtype == np.int64:
+                raise MlflowException(f"Expected float64 for '{col_name}', got int64")
+            return df[col_name].values
+
+        col_spec = MagicMock()
+        col_spec.name = col_name
+        col_spec.type.to_pandas.return_value = "float64"
+
+        schema = MagicMock()
+        schema.inputs = [col_spec]
+
+        model = MagicMock()
+        model.metadata.get_input_schema.return_value = schema
+        model.predict.side_effect = strict_predict
+        return model
+
+    @staticmethod
+    def _make_lenient_model(col_name="value", schema_col_names=None):
+        """MLflow model mock whose predict accepts any dtype.  Useful for
+        edge-case tests where the coercion path is exercised but dtype is
+        irrelevant to the assertion."""
+
+        def lenient_predict(df):
+            return df[col_name].values if col_name in df.columns else np.array([])
+
+        model = MagicMock()
+        model.predict.side_effect = lenient_predict
+
+        if schema_col_names is not None:
+            col_specs = []
+            for name in schema_col_names:
+                spec = MagicMock()
+                spec.name = name
+                spec.type.to_pandas.return_value = "float64"
+                col_specs.append(spec)
+            schema = MagicMock()
+            schema.inputs = col_specs
+            model.metadata.get_input_schema.return_value = schema
+        else:
+            model.metadata.get_input_schema.return_value = None
+
+        return model
+
+    def test_double_coercion_dict_of_columns(self):
+        """Dict-of-columns payload with whole-number ints succeeds after coercion."""
+        config = {**self._base_config, "enable_batching": False}
+        instance = self._exec_class(config, self._make_strict_model())
+
+        result = instance.predict({"value": [-100, -500]})
+
+        assert result == {"predictions": [-100.0, -500.0]}
+
+    def test_double_coercion_list_of_records(self):
+        """List-of-records payload with whole-number ints succeeds after coercion."""
+        config = {**self._base_config, "enable_batching": False}
+        instance = self._exec_class(config, self._make_strict_model())
+
+        result = instance.predict([{"value": -100}, {"value": -500}])
+
+        assert result == {"predictions": [-100.0, -500.0]}
+
+    def test_double_coercion_batching_path(self):
+        """Batching code path also coerces int64 to float64 before predict."""
+        config = {
+            **self._base_config,
+            "enable_batching": True,
+            "max_batch_size": 8,
+            "batch_wait_ms": 100,
+        }
+        instance = self._exec_class(config, self._make_strict_model())
+
+        results = instance.predict_batch([{"value": [-100, -500]}])
+
+        assert results == [{"predictions": [-100.0, -500.0]}]
+
+    def test_unknown_column_dtype_unchanged(self):
+        """Columns not present in the schema are left with their original dtype."""
+        config = {**self._base_config, "enable_batching": False}
+        model = self._make_lenient_model(col_name="value", schema_col_names=["value"])
+
+        captured = {}
+        original_side_effect = model.predict.side_effect
+
+        def capturing_predict(df):
+            captured["df"] = df.copy()
+            return original_side_effect(df)
+
+        model.predict.side_effect = capturing_predict
+
+        instance = self._exec_class(config, model)
+        instance.predict({"value": [-100, -500], "extra": [1, 2]})
+
+        assert captured["df"]["value"].dtype == np.float64
+        assert captured["df"]["extra"].dtype == np.int64
+
+    def test_no_schema_no_error(self):
+        """Model with no input schema (get_input_schema returns None) does not raise."""
+        config = {**self._base_config, "enable_batching": False}
+        model = self._make_lenient_model(col_name="value", schema_col_names=None)
+        instance = self._exec_class(config, model)
+
+        result = instance.predict({"value": [-100, -500]})
+
+        assert result == {"predictions": [-100, -500]}
+
+    def test_missing_schema_column_skipped_silently(self):
+        """Schema column absent from the input is silently skipped — no KeyError."""
+        config = {**self._base_config, "enable_batching": False}
+        # Schema declares both "value" and "missing_col"; input only has "value"
+        model = self._make_lenient_model(col_name="value", schema_col_names=["value", "missing_col"])
+        instance = self._exec_class(config, model)
+
+        result = instance.predict({"value": [-100, -500]})
+
+        assert result == {"predictions": [-100.0, -500.0]}
+
+    @pytest.mark.parametrize(
+        "col_name,pandas_dtype,json_input",
+        [
+            ("price", "float64", {"price": [-100, -500]}),
+            ("count", "int32", {"count": [100, 200]}),
+            ("amount", "int64", {"amount": [1000, 2000]}),
+            ("ts", "datetime64[ns]", {"ts": ["2024-01-01T00:00:00", "2024-01-02T00:00:00"]}),
+        ],
+        ids=["double", "integer", "long", "datetime"],
+    )
+    def test_schema_type_coercion(self, col_name, pandas_dtype, json_input):
+        """Generated predict casts each column to the dtype declared in the schema.
+
+        Covers all four common MLflow types:
+          double   (float64)       — JSON whole numbers arrive as int64, must become float64
+          integer  (int32)         — JSON integers arrive as int64, must become int32
+          long     (int64)         — JSON integers arrive as int64, cast is a no-op but must not crash
+          datetime (datetime64[ns])— JSON ISO strings arrive as object, must become datetime64
+        """
+        config = {**self._base_config, "enable_batching": False}
+
+        col_spec = MagicMock()
+        col_spec.name = col_name
+        col_spec.type.to_pandas.return_value = pandas_dtype
+
+        schema = MagicMock()
+        schema.inputs = [col_spec]
+
+        captured = {}
+
+        def capturing_predict(df):
+            captured["df"] = df.copy()
+            return np.array([0])
+
+        model = MagicMock()
+        model.metadata.get_input_schema.return_value = schema
+        model.predict.side_effect = capturing_predict
+
+        instance = self._exec_class(config, model)
+        instance.predict(json_input)
+
+        coerced = captured["df"][col_name]
+        if pandas_dtype.startswith("datetime64"):
+            assert pd.api.types.is_datetime64_any_dtype(coerced), f"Expected datetime64 dtype, got {coerced.dtype}"
+        else:
+            assert coerced.dtype == np.dtype(pandas_dtype), f"Expected {pandas_dtype}, got {coerced.dtype}"
