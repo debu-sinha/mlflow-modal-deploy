@@ -38,7 +38,7 @@ jobs:
 
       - name: Create issue on failure
         if: steps.tests.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const title = `API Compatibility: Tests failing with latest Modal/MLflow`;
