@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-13
+
+### Fixed
+
+- Generated Modal predict endpoints now coerce input DataFrame column dtypes to match the model's MLflow input schema before calling `model.predict()`. Fixes schema enforcement errors when JSON payloads serialize whole numbers as int64 for double-typed columns ([#20](https://github.com/debu-sinha/mlflow-modal-deploy/issues/20)). Applied to all three generated predict paths: non-batching predict, predict_batch, and the predict_stream fallback. Contributed by [@GuilhermePFM](https://github.com/GuilhermePFM) in [#21](https://github.com/debu-sinha/mlflow-modal-deploy/pull/21).
+
+### Changed
+
+- Bumped `actions/github-script` from 8 to 9 in `api-compatibility.yml`.
+- Bumped `softprops/action-gh-release` from 2 to 3 in `release.yml`.
+- Bumped `codecov/codecov-action` from 5 to 7 in `ci.yml`.
+
 ## [0.6.2] - 2026-03-09
 
 ### Fixed

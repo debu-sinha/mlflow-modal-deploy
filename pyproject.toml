@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlflow-modal-deploy"
-version = "0.6.2"
+version = "0.7.0"
 description = "MLflow deployment plugin for Modal serverless GPU infrastructure (actively maintained)"
 readme = "README.md"
 license = "Apache-2.0"

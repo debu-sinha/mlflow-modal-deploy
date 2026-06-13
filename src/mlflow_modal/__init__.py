@@ -12,7 +12,7 @@ from mlflow_modal.deployment import (
     target_help,
 )
 
-__version__ = "0.6.2"
+__version__ = "0.7.0"
 __all__ = [
     "SUPPORTED_GPUS",
     "ModalDeploymentClient",
