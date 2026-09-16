@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from textwrap import indent
 
 
 def _escape_string_for_codegen(value: str) -> str:
@@ -48,7 +50,7 @@ class ModalAppCodeGenerator:
         parts: list[str] = []
         parts.append(self._render_header_and_setup())
         parts.append(self._render_predict_methods())
-        parts.append(self._render_streaming_method())
+        parts.append(self._render_batch_gateway() if self._config.enable_batching else self._render_streaming_method())
         return "".join(parts)
 
     def _render_header_and_setup(self) -> str:
@@ -81,7 +83,7 @@ image = (
     {secrets_arg}
     volumes={{MODEL_DIR: model_volume}},
 )
-{self._render_concurrent_decorator()}class MLflowModel:
+{self._render_concurrent_decorator()}class {"BatchedMLflowModel" if c.enable_batching else "MLflowModel"}:
     @modal.enter()
     def load_model(self):
         import mlflow.pyfunc
@@ -113,11 +115,11 @@ image = (
             pip_packages.extend(c.model_requirements)
         if c.extra_pip_packages:
             pip_packages.extend(c.extra_pip_packages)
-        uv_pip_install_args = [f'"{pkg}"' for pkg in pip_packages]
+        uv_pip_install_args = [json.dumps(pkg) for pkg in pip_packages]
         # Use multi-line formatting when there are many packages to avoid
         # generating a single line too long for Python to parse
         if len(uv_pip_install_args) > 10:
-            uv_pip_install_str = "\n        " + ",\n        ".join(uv_pip_install_args) + ",\n    "
+            uv_pip_install_str = "\n        " + ",\n        ".join(uv_pip_install_args) + "\n    "
         else:
             uv_pip_install_str = ", ".join(uv_pip_install_args)
         return uv_pip_install_str
@@ -167,7 +169,7 @@ wheel_files = {wheel_paths}
 for whl in wheel_files:
     subprocess.check_call([sys.executable, "-m", "pip", "install", whl, "--quiet"])
 """
-        return wheel_install_code
+        return indent(wheel_install_code, "        ")
 
     def _render_gpu_str(self) -> str:
         """Handle GPU config: string, multi-GPU string ("H100:8"), or fallback list."""
@@ -198,10 +200,6 @@ for whl in wheel_files:
             prediction = self.model.predict(df)
             results.append({{"predictions": prediction.tolist() if hasattr(prediction, 'tolist') else list(prediction)}})
         return results
-
-    {self._render_fastapi_endpoint_decorator()}
-    def predict(self, input_data: dict) -> dict:
-        return self.predict_batch.local([input_data])[0]
 """
 
         return f"""
@@ -216,6 +214,30 @@ for whl in wheel_files:
                     df[col_spec.name] = df[col_spec.name].astype(col_spec.type.to_pandas())
         prediction = self.model.predict(df)
         return {{"predictions": prediction.tolist() if hasattr(prediction, "tolist") else list(prediction)}}
+"""
+
+    def _render_batch_gateway(self) -> str:
+        # Modal batched methods must be the only methods on their class.
+        # Keep the public endpoint names stable and call the batch worker remotely
+        # so Modal can combine requests arriving from different callers.
+        return f"""
+@app.cls(image=image, timeout={self._config.timeout}, max_containers=1)
+class MLflowModel:
+    {self._render_fastapi_endpoint_decorator()}
+    def predict(self, input_data: dict) -> dict:
+        return BatchedMLflowModel().predict_batch.remote(input_data)
+
+    {self._render_fastapi_endpoint_decorator()}
+    def predict_stream(self, input_data: dict):
+        import json
+        from fastapi.responses import StreamingResponse
+
+        def generate():
+            result = BatchedMLflowModel().predict_batch.remote(input_data)
+            yield f"data: {{json.dumps(result)}}\\n\\n"
+            yield "data: [DONE]\\n\\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
 """
 
     def _render_fastapi_endpoint_decorator(self) -> str:

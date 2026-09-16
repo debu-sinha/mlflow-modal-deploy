@@ -62,16 +62,13 @@ deployment = client.create_deployment(
         "gpu": "T4",
         "memory": 2048,
         "min_containers": 1,
-    }
+    },
 )
 
 print(f"Deployed to: {deployment['endpoint_url']}")
 
 # Make predictions
-predictions = client.predict(
-    deployment_name="my-classifier",
-    inputs={"feature1": [1, 2, 3], "feature2": [4, 5, 6]}
-)
+predictions = client.predict(deployment_name="my-classifier", inputs={"feature1": [1, 2, 3], "feature2": [4, 5, 6]})
 ```
 
 ### CLI
@@ -139,12 +136,7 @@ Before deploying to Modal's cloud infrastructure, test your deployment locally t
 ```python
 from mlflow_modal import run_local
 
-run_local(
-    target_uri="modal",
-    name="test-model",
-    model_uri="runs:/abc123/model",
-    config={"gpu": "T4"}
-)
+run_local(target_uri="modal", name="test-model", model_uri="runs:/abc123/model", config={"gpu": "T4"})
 ```
 
 This runs `modal serve` locally, allowing you to verify:
@@ -208,7 +200,7 @@ client.create_deployment(
         "batch_wait_ms": 50,
         "min_containers": 2,
         "max_containers": 20,
-    }
+    },
 )
 ```
 
@@ -223,11 +215,11 @@ client.create_deployment(
     config={
         "gpu": "A100",
         "extra_pip_packages": [
-            "accelerate>=0.24",      # GPU inference optimization
-            "prometheus_client",     # Monitoring
-            "structlog",             # Production logging
+            "accelerate>=0.24",  # GPU inference optimization
+            "prometheus_client",  # Monitoring
+            "structlog",  # Production logging
         ],
-    }
+    },
 )
 ```
 
@@ -260,11 +252,10 @@ client.create_deployment(
         # Option 1: Use Modal secret for authenticated access
         "modal_secret": "pypi-auth",
         "extra_pip_packages": ["my-private-package>=1.0"],
-
         # Option 2: Direct URL (for unauthenticated private repos)
         # "pip_index_url": "https://pypi.my-company.com/simple/",
         # "pip_extra_index_url": "https://pypi.org/simple/",
-    }
+    },
 )
 ```
 
@@ -298,7 +289,7 @@ client.create_deployment(
     model_uri="runs:/abc123/model",
     config={
         "proxy_auth": True,
-    }
+    },
 )
 ```
 
@@ -306,8 +297,8 @@ client.create_deployment(
 import os
 
 # Set an environment variable (if are not set)
-os.environ['PROXY_AUTH_TOKEN_ID'] = 'your_api_key_here'
-os.environ['PROXY_AUTH_TOKEN_SECRET'] = 'your_secret_here'
+os.environ["PROXY_AUTH_TOKEN_ID"] = "your_api_key_here"
+os.environ["PROXY_AUTH_TOKEN_SECRET"] = "your_secret_here"
 
 # Make predictions
 predictions = client.predict(
@@ -356,8 +347,8 @@ client.create_deployment(
     model_uri="runs:/abc123/model",
     config={
         "startup_timeout": 600,  # 10 minutes for model loading
-        "timeout": 300,          # 5 minutes for inference requests
-    }
+        "timeout": 300,  # 5 minutes for inference requests
+    },
 )
 ```
 
@@ -371,7 +362,7 @@ client.create_deployment(
     model_uri="runs:/abc123/model",
     config={
         "extra_pip_packages": ["missing-package>=1.0"],
-    }
+    },
 )
 ```
 
@@ -427,3 +418,11 @@ Apache License 2.0
 - [GitHub Issues](https://github.com/debu-sinha/mlflow-modal-deploy/issues) - Bug reports and feature requests
 - [MLflow Slack](https://mlflow.org/slack) - Community discussion
 - [Modal Community](https://modal.com/slack) - Modal-specific questions
+
+### Verification
+
+Install the locked development environment with `uv sync --locked --extra dev`.
+Run `uv run --no-sync pytest tests/` for local checks. To exercise real deployments,
+set `TEST_MODAL_INTEGRATION=1`, `PROXY_AUTH_TOKEN_ID`, and `PROXY_AUTH_TOKEN_SECRET`,
+then run the same suite. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and cleanup
+requirements. Proxy credentials are sent on both prediction endpoints when configured.

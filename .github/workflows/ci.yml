@@ -5,64 +5,70 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  pull_request_target:
-    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: Set up Python
         run: uv python install 3.10
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev --python 3.10
       - name: Run pre-commit
-        run: SKIP=no-commit-to-branch uv run pre-commit run --all-files
+        run: SKIP=no-commit-to-branch uv run --no-sync pre-commit run --all-files
       - name: Run mypy
-        run: uv run mypy src/
+        run: uv run --no-sync mypy src/
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --cov=mlflow_modal --cov-report=xml --cov-report=term-missing --cov-fail-under=55
+        run: uv run --no-sync pytest tests/ -v --cov=mlflow_modal --cov-report=xml --cov-report=term-missing --cov-fail-under=55
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v7
+        if: matrix.python-version == '3.12' && github.event_name == 'push'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           fail_ci_if_error: false
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: hynek/build-and-inspect-python-package@v2
+          persist-credentials: false
+      - uses: hynek/build-and-inspect-python-package@2abe76da66d0a6a4a227101f9348ee855797cfa5 # v3.0.1
 
   check:
     if: always()
     needs: [lint, test, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: re-actors/alls-green@release/v1
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}

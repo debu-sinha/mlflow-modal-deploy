@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.parse
 from collections.abc import Iterator
 from typing import Any
@@ -335,7 +336,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
     def _get_modal_workspace(self) -> str | None:
         """Get the current Modal workspace/username."""
         result = subprocess.run(
-            ["modal", "profile", "current"],
+            [sys.executable, "-m", "modal", "profile", "current"],
             capture_output=True,
             text=True,
         )
@@ -555,7 +556,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
                     batch.put_directory(wheels_dir, "/wheels")
 
             _logger.info(f"Deploying Modal app: {name}")
-            deploy_cmd = ["modal", "deploy", app_file]
+            deploy_cmd = [sys.executable, "-m", "modal", "deploy", app_file]
             if self.workspace:
                 deploy_cmd.extend(["--env", self.workspace])
 
@@ -580,23 +581,8 @@ class ModalDeploymentClient(BaseDeploymentClient):
                     error_code=INVALID_PARAMETER_VALUE,
                 )
 
-            endpoint_url = None
-            streaming_url = None
-            for line in result.stdout.split("\n"):
-                if "https://" in line and ".modal.run" in line:
-                    match = re.search(r"(https://[^\s]+\.modal\.run[^\s]*)", line)
-                    if match:
-                        url = match.group(1)
-                        # Prefer the regular predict endpoint over streaming
-                        if "-predict-stream." in url or "/predict_stream" in url:
-                            streaming_url = url
-                        elif "-predict." in url or "/predict" in url or endpoint_url is None:
-                            endpoint_url = url
-            # Fall back to streaming URL if no regular predict URL found
-            if endpoint_url is None:
-                endpoint_url = streaming_url
-            if endpoint_url is None:
-                endpoint_url = self._construct_endpoint_url(name, "predict")
+            model = modal.Cls.from_name(name, "MLflowModel", environment_name=self.workspace)()
+            endpoint_url = model.predict.get_web_url()
 
             return {
                 "name": name,
@@ -626,31 +612,35 @@ class ModalDeploymentClient(BaseDeploymentClient):
         """Delete a Modal deployment."""
         modal = _import_modal()
 
-        stop_cmd = ["modal", "app", "stop", name]
+        stop_cmd = [sys.executable, "-m", "modal", "app", "stop", name, "--yes"]
         if self.workspace:
             stop_cmd.extend(["--env", self.workspace])
 
         result = subprocess.run(stop_cmd, capture_output=True, text=True)
 
-        volume_name = f"{name}-model-volume"
-        try:
-            volume = modal.Volume.from_name(volume_name)
-            volume.delete()
-            _logger.info(f"Deleted volume: {volume_name}")
-        except Exception as e:
-            _logger.debug(f"Could not delete volume {volume_name}: {e}")
-
-        if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
+        error = (result.stderr or "").lower()
+        missing_app = "not found" in error or ("no app with name" in error and "found" in error)
+        already_stopped = "already stopped" in error
+        if result.returncode != 0 and not missing_app and not already_stopped:
             raise MlflowException(
                 f"Failed to delete Modal app: {result.stderr}",
                 error_code=INVALID_PARAMETER_VALUE,
             )
 
+        volume_name = f"{name}-model-volume"
+        try:
+            modal.Volume.objects.delete(volume_name, environment_name=self.workspace, allow_missing=True)
+            _logger.info(f"Deleted volume: {volume_name}")
+        except modal.exception.NotFoundError:
+            pass
+        except Exception as e:
+            raise MlflowException(f"App stopped, but failed to delete volume {volume_name}: {e}") from e
+
         return {"name": name, "deleted": True}
 
     def list_deployments(self, endpoint: str | None = None) -> list[dict[str, Any]]:
         """List all Modal deployments."""
-        list_cmd = ["modal", "app", "list", "--json"]
+        list_cmd = [sys.executable, "-m", "modal", "app", "list", "--json"]
         if self.workspace:
             list_cmd.extend(["--env", self.workspace])
 
@@ -670,7 +660,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
         # Modal JSON uses "Description" for app name and "App ID" for ID
         return [
             {
-                "name": app.get("Description", app.get("name", app.get("App ID", "unknown"))),
+                "name": app.get("description", app.get("Description", app.get("name", app.get("App ID", "unknown")))),
                 "app_id": app.get("App ID", app.get("app_id")),
                 "state": app.get("State", app.get("state")),
             }
@@ -682,6 +672,10 @@ class ModalDeploymentClient(BaseDeploymentClient):
         deployments = self.list_deployments()
         for deployment in deployments:
             if deployment.get("name") == name:
+                modal = _import_modal()
+                model = modal.Cls.from_name(name, "MLflowModel", environment_name=self.workspace)()
+                deployment["endpoint_url"] = model.predict.get_web_url()
+                deployment["streaming_url"] = model.predict_stream.get_web_url()
                 return deployment
 
         raise MlflowException(
@@ -726,14 +720,15 @@ class ModalDeploymentClient(BaseDeploymentClient):
 
         response.raise_for_status()
 
-        return PredictionsResponse(predictions=response.json())
+        return PredictionsResponse(response.json())
 
     def _build_proxy_auth_headers(self, deployment_name: str) -> dict[str, str]:
-        proxy_auth_enabled = self.get_deployment(deployment_name).get("config", {}).get("proxy_auth", False)
-        if not proxy_auth_enabled:
-            return {}
+        # App listings do not include endpoint auth configuration. Send the
+        # explicitly configured proxy credentials on both prediction endpoints.
         token_id = os.environ.get("PROXY_AUTH_TOKEN_ID")
         token_secret = os.environ.get("PROXY_AUTH_TOKEN_SECRET")
+        if not token_id and not token_secret:
+            return {}
         if not token_id or not token_secret:
             missing = []
             if not token_id:
@@ -741,7 +736,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
             if not token_secret:
                 missing.append("PROXY_AUTH_TOKEN_SECRET")
             raise MlflowException(
-                f"Proxy auth is enabled but the following environment variables are not set: {', '.join(missing)}. "
+                f"Proxy authentication is partially configured; the following environment variables are not set: {', '.join(missing)}. "
                 "Run 'modal token new' to create a new token.",
                 error_code=INVALID_PARAMETER_VALUE,
             )
@@ -800,8 +795,8 @@ class ModalDeploymentClient(BaseDeploymentClient):
         endpoint_url = deployment.get("endpoint_url")
 
         # Construct streaming endpoint URL
-        stream_url = None
-        if endpoint_url:
+        stream_url = deployment.get("streaming_url")
+        if not stream_url and endpoint_url:
             # Handle both URL patterns:
             # 1. Path-based: https://host/predict -> https://host/predict_stream
             # 2. Subdomain-based: https://x--y-predict.modal.run -> https://x--y-predict-stream.modal.run
@@ -809,7 +804,7 @@ class ModalDeploymentClient(BaseDeploymentClient):
                 stream_url = endpoint_url.replace("/predict", "/predict_stream")
             else:
                 stream_url = endpoint_url.replace("-predict.", "-predict-stream.")
-        else:
+        elif not stream_url:
             # Construct URL from Modal naming convention
             stream_url = self._construct_endpoint_url(deployment_name, "predict_stream")
 
@@ -894,7 +889,7 @@ def run_local(
             f.write(app_code)
 
         _logger.info(f"Starting local Modal server for {name}...")
-        subprocess.run(["modal", "serve", app_file], cwd=tmp_dir.path())
+        subprocess.run([sys.executable, "-m", "modal", "serve", app_file], cwd=tmp_dir.path())
 
 
 def target_help() -> str:
