@@ -75,3 +75,7 @@ mlruns/
 mlruns-blog/
 mlflow.db
 mlflow-blog.db
+
+.venv-*/
+mlflow.db-shm
+mlflow.db-wal

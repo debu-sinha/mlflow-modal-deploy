@@ -6,16 +6,23 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:  # Allow manual trigger
 
+permissions:
+  contents: read
+
 jobs:
   test-latest:
+    permissions:
+      contents: read
+      issues: write
     name: Test with latest dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
 
@@ -33,12 +40,12 @@ jobs:
       - name: Run tests
         id: tests
         run: |
-          pytest tests/test_deployment.py -v --tb=short
+          pytest tests/ -v --tb=short
         continue-on-error: true
 
       - name: Create issue on failure
         if: steps.tests.outcome == 'failure'
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const title = `API Compatibility: Tests failing with latest Modal/MLflow`;

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-15
+
+### Fixed
+
+- Escape requirement markers and generate valid Python for long requirements lists with custom package indexes and local wheels.
+- Run the Modal CLI with the active Python interpreter, parse current app-list fields, and resolve actual endpoint URLs through the SDK.
+- Return the standard MLflow prediction response and send explicitly configured proxy credentials on prediction requests.
+- Stop apps noninteractively, delete their volumes through the current SDK, preserve volumes when stopping fails, and report cleanup failures.
+- Route batching through a separate Modal worker class so web endpoints can deploy and requests can actually be batched.
+
+### Changed
+
+- Require Modal 1.5.5 or newer for the current app lifecycle API; refresh the lockfile and development tools, and test Python 3.10 through 3.14.
+- Replace permissive end-to-end checks with seven cloud scenarios that require successful prediction and cleanup, including proxy auth.
+- Pin GitHub Actions and run fork pull-request checks with read-only permissions.
+
 ## [0.7.0] - 2026-06-13
 
 ### Fixed

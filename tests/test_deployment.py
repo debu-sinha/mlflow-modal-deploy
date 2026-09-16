@@ -1376,7 +1376,7 @@ class TestSchemaCoercion:
         require a real Modal installation or network calls."""
         modal_mock = types.ModuleType("modal")
 
-        _noop = lambda *a, **kw: (lambda fn: fn)  # noqa: E731
+        _noop = lambda *a, **kw: lambda fn: fn  # noqa: E731
         modal_mock.enter = _noop
         modal_mock.fastapi_endpoint = _noop
         modal_mock.batched = _noop
@@ -1402,7 +1402,8 @@ class TestSchemaCoercion:
         namespace = {}
         with patch.dict(sys.modules, {"modal": self._build_modal_mock()}):
             exec(code, namespace)
-        instance = namespace["MLflowModel"].__new__(namespace["MLflowModel"])
+        cls = namespace["BatchedMLflowModel" if config.get("enable_batching") else "MLflowModel"]
+        instance = cls.__new__(cls)
         instance.model = mock_model
         return instance
 
@@ -1518,7 +1519,7 @@ class TestSchemaCoercion:
         assert result == {"predictions": [-100, -500]}
 
     def test_missing_schema_column_skipped_silently(self):
-        """Schema column absent from the input is silently skipped — no KeyError."""
+        """Schema column absent from the input is silently skipped: no KeyError."""
         config = {**self._base_config, "enable_batching": False}
         # Schema declares both "value" and "missing_col"; input only has "value"
         model = self._make_lenient_model(col_name="value", schema_col_names=["value", "missing_col"])
@@ -1542,10 +1543,10 @@ class TestSchemaCoercion:
         """Generated predict casts each column to the dtype declared in the schema.
 
         Covers all four common MLflow types:
-          double   (float64)       — JSON whole numbers arrive as int64, must become float64
-          integer  (int32)         — JSON integers arrive as int64, must become int32
-          long     (int64)         — JSON integers arrive as int64, cast is a no-op but must not crash
-          datetime (datetime64[ns])— JSON ISO strings arrive as object, must become datetime64
+          double   (float64):       JSON whole numbers arrive as int64, must become float64
+          integer  (int32):         JSON integers arrive as int64, must become int32
+          long     (int64):         JSON integers arrive as int64, cast is a no-op but must not crash
+          datetime (datetime64[ns]): JSON ISO strings arrive as object, must become datetime64
         """
         config = {**self._base_config, "enable_batching": False}
 
@@ -1580,7 +1581,7 @@ class TestSchemaCoercion:
 
         predict_stream falls back to the regular predict path when the model
         has no native predict_stream attribute.  The schema coercion block must
-        run there too — without it a double-schema model rejects whole-number
+        run there too: without it a double-schema model rejects whole-number
         JSON values.
         """
         import json

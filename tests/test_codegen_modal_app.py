@@ -1,5 +1,7 @@
 """Unit tests for the Modal app code generator."""
 
+import ast
+
 import pytest
 
 from mlflow_modal.codegen import ModalAppCodeConfig, ModalAppCodeGenerator, generate_modal_app_code
@@ -63,7 +65,7 @@ class TestModalAppCodeGenerator:
         assert "max_batch_size=16" in code
         assert "wait_ms=250" in code
         assert "def predict_batch" in code
-        assert "return self.predict_batch.local([input_data])[0]" in code
+        assert "return BatchedMLflowModel().predict_batch.remote(input_data)" in code
 
     def test_batching_disabled_renders_simple_predict(self) -> None:
         config = _make_base_config(enable_batching=False)
@@ -328,19 +330,19 @@ class TestRenderPredictMethods:
 
     def test_batching_enabled_includes_predict_batch_and_delegation(self) -> None:
         gen = _make_generator(enable_batching=True, max_batch_size=8, batch_wait_ms=100)
-        result = gen._render_predict_methods()
+        result = gen.generate()
         assert "@modal.batched" in result
         assert "def predict_batch" in result
-        assert "return self.predict_batch.local([input_data])[0]" in result
+        assert "return BatchedMLflowModel().predict_batch.remote(input_data)" in result
 
     def test_batching_enabled_proxy_auth_on_predict_endpoint(self) -> None:
         gen = _make_generator(enable_batching=True, proxy_auth=True)
-        result = gen._render_predict_methods()
+        result = gen.generate()
         assert "requires_proxy_auth=True" in result
 
     def test_batching_enabled_modal_batched_has_no_proxy_auth(self) -> None:
         gen = _make_generator(enable_batching=True, proxy_auth=True)
-        result = gen._render_predict_methods()
+        result = gen.generate()
         batched_idx = result.index("@modal.batched")
         proxy_idx = result.index("requires_proxy_auth=True")
         assert proxy_idx > batched_idx
@@ -421,3 +423,49 @@ class TestGenerate:
     def test_gpu_variants_in_generated_code(self, gpu_config: object, expected: str) -> None:
         code = generate_modal_app_code(_make_base_config(gpu_config=gpu_config))
         assert expected in code
+
+
+@pytest.mark.parametrize("count", [1, 12])
+def test_requirement_literals_round_trip(count):
+    requirement = 'async-timeout==5.0.1; python_full_version < "3.11"'
+    requirements = [requirement] * count
+    config = _make_base_config(model_requirements=requirements, extra_pip_packages=['example; os_name == "posix"'])
+    tree = ast.parse(generate_modal_app_code(config))
+    call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "uv_pip_install"
+    )
+    assert [ast.literal_eval(arg) for arg in call.args] == ["mlflow", *requirements, 'example; os_name == "posix"']
+
+
+def test_wheel_installation_is_inside_load_model():
+    tree = ast.parse(generate_modal_app_code(_make_base_config(wheel_filenames=["example.whl"])))
+    cls = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    loader = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "load_model")
+    assert any(isinstance(node, ast.For) for node in loader.body)
+    assert isinstance(loader.body[-1], ast.Assign)
+    compile(tree, "modal_app.py", "exec")
+
+
+@pytest.mark.parametrize(
+    "index_config", [{"pip_index_url": "https://pypi.org/simple/"}, {"pip_extra_index_url": "https://pypi.org/simple/"}]
+)
+def test_multiline_requirements_with_index_compile(index_config):
+    code = generate_modal_app_code(
+        _make_base_config(model_requirements=[f"pkg{i}>=1" for i in range(12)], **index_config)
+    )
+    compile(code, "modal_app.py", "exec")
+
+
+def test_batched_worker_has_no_web_endpoints():
+    tree = ast.parse(generate_modal_app_code(_make_base_config(enable_batching=True)))
+    worker = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "BatchedMLflowModel")
+    decorators = [
+        ast.unparse(dec)
+        for method in worker.body
+        if isinstance(method, ast.FunctionDef)
+        for dec in method.decorator_list
+    ]
+    assert not any("fastapi_endpoint" in dec for dec in decorators)
+    assert any("batched" in dec for dec in decorators)
